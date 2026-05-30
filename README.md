@@ -49,22 +49,30 @@ evoc are imported lazily only by the functions that need them.
 ```python
 import dire_evoc as de
 
-# intrinsic dimension, reusing a fitted DiRe reducer's kNN graph (free):
-dim = de.intrinsic_dimension_from_dire(reducer, method="twonn")
+# one call: DiRe layout -> EVoC clustering (GPU SLT when available) -> labels,
+# intrinsic dimension, and out-of-sample predict.
+model = de.DiReEVoC(min_samples=10).fit(X)
+labels = model.labels_                 # operative-layer clustering (-1 = noise)
+dim    = model.intrinsic_dimension_    # TwoNN, free off DiRe's kNN graph
+new    = model.predict(X_new)          # kNN vote in the original space
 
-# ... or standalone from a point cloud:
-dim = de.intrinsic_dimension(X, method="twonn")
+# ... or use the pieces directly:
+dim = de.intrinsic_dimension_from_dire(reducer, method="twonn")   # from a fitted reducer
+dim = de.intrinsic_dimension(X, method="twonn")                   # standalone point cloud
 
-# GPU single-linkage tree for EVoC's post-process:
 from dire_evoc.hybrid import gpu_single_linkage_tree
-slt = gpu_single_linkage_tree(layout, min_samples=10)
+slt = gpu_single_linkage_tree(layout, min_samples=10)             # GPU SLT for EVoC
 ```
 
 ## Status
 
-Alpha. `dimension` and `predict` are implemented and tested on CPU; `hybrid` provides the
-validated GPU single-linkage-tree producer and feeds EVoC's post-process through the
-upstream `build_cluster_layers(..., precomputed_linkage=...)` seam.
+Alpha, validated end to end. `dimension` and `predict` are implemented and tested on CPU
+(13 tests). `hybrid` provides the GPU single-linkage-tree producer and feeds EVoC's
+post-process through the `build_cluster_layers(..., precomputed_linkage=...)` seam (live
+upstream). `DiReEVoC` (`pipeline.py`) ties it together. End-to-end validation
+(`scripts/validate_hybrid_e2e.py`): the packaged hybrid reproduces native EVoC exactly
+(ARI = 1.0 at fixed k on synthetic / MNIST / 1M points) and is **2.7× faster at 1M points
+on 8 threads** (the win regime — at small n / many cores the CPU baseline is faster).
 
 ## Lineage / credit
 

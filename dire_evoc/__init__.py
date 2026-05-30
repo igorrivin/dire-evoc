@@ -20,9 +20,11 @@ from .dimension import (
     mle,
     twonn,
 )
+from .pipeline import DiReEVoC
 from .predict import knn_vote_predict, prepare_reference
 
 __all__ = [
+    "DiReEVoC",
     "intrinsic_dimension",
     "intrinsic_dimension_from_dire",
     "twonn",
