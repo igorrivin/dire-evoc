@@ -40,9 +40,13 @@ class DiReEVoC:
     use_gpu : {"auto", True, False}, default="auto"
         Whether to build the single-linkage tree on the GPU (cuML). "auto" uses the GPU
         iff cuML imports. The two paths give the same clustering; GPU wins at large n.
-    selector : {"silhouette", "base", "none"}, default="silhouette"
-        How to pick the operative layer for ``labels_``. "silhouette" scores each layer
-        on the layout (sampled) and takes the best; "base" uses the finest layer.
+    selector : {"silhouette", "silhouette_raw", "base", "none"}, default="silhouette"
+        How to pick the operative layer for ``labels_``. "silhouette" uses
+        COVERAGE-WEIGHTED silhouette (mean silhouette over all points, noise scored 0) --
+        the validated default; it avoids the over-segmentation that plain silhouette
+        suffers when a layer discards much of the data as noise. "silhouette_raw" is the
+        old non-coverage-weighted behaviour; "base" uses the finest layer; "none" the
+        coarsest.
     n_neighbors_predict : int or None
         Neighbours for the out-of-sample vote; defaults to the DiRe ``n_neighbors``.
     random_state : int or None
@@ -106,23 +110,38 @@ class DiReEVoC:
         )
 
     def _select_layer(self, layout, layers):
+        """Pick the operative layer by COVERAGE-WEIGHTED silhouette on the layout.
+
+        Plain silhouette is computed only on clustered points, so a layer that dumps
+        half the data as noise but leaves tight residual clusters scores well -- it
+        systematically over-segments (e.g. picks k=51 on 20NG where k=8 is right).
+        The fix: score the mean silhouette over *all* sampled points, with noise points
+        contributing 0. That equals ``silhouette(clustered) * coverage`` (coverage =
+        fraction non-noise), since silhouette_score is the mean of the per-point values.
+        It rewards layers that are both well-separated AND explain the data, and drops
+        ARI-regret to ~0 across synth/MNIST/20NG (the last being the case plain
+        silhouette could not solve). ``selector="silhouette_raw"`` keeps the old behaviour.
+        """
         if self.selector == "base" or len(layers) == 1:
             return 0
         if self.selector == "none":
             return len(layers) - 1
-        # silhouette on the layout, sampled for tractability; the validated default.
         from sklearn.metrics import silhouette_score
         rng = np.random.default_rng(self.random_state)
         n = layout.shape[0]
         sample = (rng.choice(n, 10_000, replace=False) if n > 10_000
                   else np.arange(n))
-        best_i, best_s = 0, -1.0
+        Xs = layout[sample]
+        weight_by_coverage = self.selector != "silhouette_raw"
+        best_i, best_s = 0, -np.inf
         for i, lab in enumerate(layers):
             l = lab[sample]
             mask = l >= 0
             if np.unique(l[mask]).size < 2:        # need >=2 clusters to score
                 continue
-            s = silhouette_score(layout[sample][mask], l[mask])
+            s = silhouette_score(Xs[mask], l[mask])
+            if weight_by_coverage:
+                s *= mask.mean()                   # mean silhouette over ALL points (noise=0)
             if s > best_s:
                 best_i, best_s = i, s
         return best_i
