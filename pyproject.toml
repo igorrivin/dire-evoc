@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,6 +9,7 @@ description = "DiRe-RAPIDS layouts + EVoC density clustering: GPU Phase-2 hybrid
 readme = "README.md"
 license = {text = "MIT"}
 authors = [{name = "Igor Rivin", email = "rivin@temple.edu"}]
+requires-python = ">=3.10"
 keywords = ["clustering", "dimensionality-reduction", "intrinsic-dimension", "hdbscan", "gpu", "rapids", "evoc", "dire"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -16,9 +17,12 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
-requires-python = ">=3.10"
-# Pure-numpy cores (dimension, predict) need only these; GPU/cluster deps are lazy.
+# Pure-numpy cores (dimension, predict, pipeline orchestration) need only these; the
+# GPU/cluster dependencies are imported lazily inside the functions that use them.
 dependencies = [
     "numpy>=1.21.0",
     "scipy>=1.7.0",
@@ -32,10 +36,26 @@ cluster = ["evoc"]
 dire = ["dire-rapids"]
 # GPU single-linkage tree + device kNN
 rapids = ["cuml-cu12>=23.0.0", "cuvs-cu12>=23.0.0", "cupy-cuda12x>=10.0.0"]
-dev = ["pytest>=7.0.0", "pytest-timeout>=2.1.0"]
-
-[tool.setuptools.packages.find]
-include = ["dire_evoc*"]
+dev = ["pytest>=7.0.0", "pytest-cov", "pytest-timeout>=2.1.0", "black", "ruff"]
 
 [project.urls]
+Homepage = "https://github.com/igorrivin/dire-evoc"
 Repository = "https://github.com/igorrivin/dire-evoc"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]  # line length handled by black

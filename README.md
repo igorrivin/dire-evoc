@@ -74,6 +74,14 @@ upstream). `DiReEVoC` (`pipeline.py`) ties it together. End-to-end validation
 (ARI = 1.0 at fixed k on synthetic / MNIST / 1M points) and is **2.7× faster at 1M points
 on 8 threads** (the win regime — at small n / many cores the CPU baseline is faster).
 
+## Documentation
+
+- [`docs/usage.md`](docs/usage.md) — full usage guide for all four capabilities.
+- [`docs/benchmarks.md`](docs/benchmarks.md) — quality vs vanilla EVoC (honest: the win is
+  throughput + intrinsic dimension; clustering quality is currently bottlenecked by layer
+  selection, not the embedding).
+- [`examples/`](examples/) — runnable `quickstart.py` and `benchmark_quality.py`.
+
 ## Lineage / credit
 
 `dire-evoc` (the integration idea) is by Igor Rivin. It builds on EVoC by Leland McInnes
