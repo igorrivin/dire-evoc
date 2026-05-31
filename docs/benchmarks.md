@@ -14,18 +14,21 @@ the same EVoC clustering on a DiRe layout. ARI is against ground-truth labels.
 
 ## Results (with coverage-weighted layer selection)
 
-| dataset | metric | DiReEVoC | vanilla EVoC | winner |
-|---|---|---|---|---|
-| MNIST-784 (10 cls) | auto | 0.832 (k=11) | **0.903** (k=10) | vanilla |
-| | oracle | 0.832 (k=11) | **0.903** (k=10) | vanilla |
-| | fixed-k=10 | 0.890 | **0.903** | ~tie (substrate comparable) |
-| 20NG-BGE384 (20 cls) | auto | **0.214** (k=13) | 0.192 (k=20) | **DiRe** |
-| | oracle | **0.214** (k=13) | 0.192 (k=20) | **DiRe** |
-| | fixed-k=20 | 0.109 | **0.192** | vanilla |
+Operational (auto) ARI vs ground truth, across datasets of varying size and origin:
 
-(arXiv-BGE, from the prior scaling study: both methods ARI ≈ 0 with ~75% noise — a
-continuous manifold where a hard partition is the wrong object; the DiRe *layout* is the
-deliverable there, not a clustering.)
+| dataset | n | d | cls | DiReEVoC (auto) | vanilla EVoC (auto) | winner | fixed-k substrate |
+|---|---|---|---|---|---|---|---|
+| Fashion-MNIST | 60k | 784 | 10 | **0.395** (k=14) | 0.224 (k=16) | **DiRe +0.17** | DiRe 0.396 vs 0.240 |
+| DBpedia-14 (BGE) | 49k | 384 | 14 | **0.623** (k=13) | 0.606 (k=12) | **DiRe +0.02** | ~tie 0.612 vs 0.610 |
+| 20NG (BGE) | 19k | 384 | 20 | **0.214** (k=13) | 0.192 (k=20) | **DiRe +0.02** | vanilla 0.109 vs 0.192 |
+| MNIST | 70k | 784 | 10 | 0.832 (k=11) | **0.903** (k=10) | vanilla −0.07 | ~tie 0.890 vs 0.903 |
+| Olivetti faces | 400 | 4096 | 40 | 0.094 (k=7) | 0.091 (k=6) | tie (both poor) | vanilla 0.024 vs 0.292 |
+| arXiv-BGE | 723k | 384 | — | ≈0 | ≈0 | — (continuous) | — |
+
+DBpedia-14 is a genuine *labeled vector store*: DBpedia ontology entities (Company, Artist,
+Animal, Film, …) embedded with BGE-small. arXiv-BGE (prior scaling study): both ≈0 with
+~75% noise — a continuous manifold where a hard partition is the wrong object and the DiRe
+*layout* is the deliverable. Reproduce data with `examples/prepare_datasets.py`.
 
 ## The layer-selector fix (coverage-weighted silhouette)
 
@@ -45,20 +48,32 @@ uses it by default; `selector="silhouette_raw"` restores the old behaviour.
 
 ## Honest conclusion
 
-With the selector fix, the picture is dataset-dependent rather than a universal win:
+With the coverage-weighted selector, DiRe→EVoC is **competitive-to-better on real,
+medium-to-large labeled datasets**, and the wins are largest where a good embedding helps
+most:
 
-- **20NG: DiRe→EVoC wins** (0.214 vs 0.192) — the DiRe layout's k=13 clustering beats
-  anything vanilla EVoC produces, and the selector now finds it.
-- **MNIST: vanilla still wins narrowly** (0.903 vs 0.832), and here the selector is *not*
-  the problem — the selected layer already equals the oracle (k=11). The residual is layer
-  *granularity*: `build_cluster_layers` never produces a clean k=10 layer on this layout
-  (its layers are k=11, 20, 45…). At fixed k=10 the substrate ties vanilla (0.890 vs 0.903),
-  so the gap is the discrete peak granularity, not the embedding.
+- **Fashion-MNIST: clear win (+0.17).** The DiRe layout separates the classes far better
+  than EVoC's own embedding (and with much less noise, 18% vs 33%).
+- **DBpedia-14 and 20NG: wins** (+0.02 each) — modest but real, on labeled vector-store /
+  text-embedding data.
+- **MNIST: narrow loss (−0.07)** — and *not* a selector failure (selected = oracle). The
+  residual is layer *granularity*: no clean k=10 layer is produced (layers are k=11, 20,
+  45…); at fixed k=10 the substrate ties vanilla (0.890 vs 0.903).
 
-So the substrate is competitive-to-better and the selector is now sound; the remaining
-quality gap (MNIST) is a layer-granularity issue. dire-evoc's robust wins remain
-**throughput** (GPU Phase-2 hybrid) and **free intrinsic dimension**, with a genuine
-clustering-quality win on 20NG and layout-as-deliverable on continuous manifolds.
+Two regime boundaries the data makes explicit:
+
+- **Small n (Olivetti, n=400): DiRe underperforms.** The DiRe manifold optimization is
+  data-hungry; with 400 points / 10 per class its layout is worse than EVoC's own embedding
+  at fixed k (0.024 vs 0.292). dire-evoc's substrate advantage needs enough data to form
+  the manifold — it is a large-n method.
+- **Continuous manifolds (arXiv): a partition is the wrong object** for either method
+  (ARI ≈ 0); the layout itself is the deliverable.
+
+So the earlier "vanilla wins everything" was a *selector* artifact, now fixed; and the
+opposite over-claim ("DiRe always wins") is also false. The honest map: **DiRe→EVoC wins
+on medium/large density-separated data, loses on tiny data, and neither clusters continuous
+manifolds.** Robust wins across all regimes remain **throughput** (GPU Phase-2 hybrid) and
+**free intrinsic dimension**, plus layout-as-deliverable on continuous manifolds.
 
 ## Caveat on methodology
 
