@@ -27,8 +27,7 @@ METRIC -- CRITICAL. These estimators are *ratio*-based, so the distance metric m
           dimension off how neighbour count grows with radius (volume ~ r^d); squaring
           the radius (r -> r^2) sends r^d -> r^(d/2), so raw cosine distance HALVES the
           reported ID. Pass ``metric='cosine'`` (or ``'chordal'``) and the neighbour
-          distances are converted to angles before estimation. Validated: on arXiv-BGE
-          the raw-cosine metric reports ~half the correct angular value.
+          distances are converted to angles before estimation.
 """
 import numpy as np
 
@@ -175,8 +174,7 @@ def intrinsic_dimension_from_dire(reducer, method="twonn", k=None):
 
     Reads ``reducer._knn_distances`` (DiRe stores cosine distances on its
     cosine-metric path) and converts to the angular geodesic before estimating, so
-    the ID is correct rather than doubled. Validated against exact-kNN ID to <0.6%
-    on arXiv-BGE and exactly on MNIST.
+    the ID is not biased downward by treating cosine distance as a Euclidean radius.
 
     Parameters
     ----------

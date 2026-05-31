@@ -4,10 +4,8 @@
 
   1. build a DiRe layout of the data (GPU, cuVS) -- the common substrate;
   2. cluster the layout with EVoC's density machinery, using the GPU single-linkage
-     tree when RAPIDS is available (``dire_evoc.hybrid``) and EVoC's CPU MST otherwise
-     -- the clustering is identical either way (validated ARI = 1.0 at fixed k);
-  3. select the operative layer by silhouette on the layout -- the validated default
-     selector (markedly lower ARI-regret than EVoC's persistence default);
+     tree when RAPIDS is available (``dire_evoc.hybrid``) and EVoC's CPU MST otherwise;
+  3. select the operative layer by coverage-weighted silhouette on the layout;
   4. read the intrinsic dimension off DiRe's kNN graph for free;
   5. expose ``predict`` for out-of-sample points via a kNN vote in the ORIGINAL space.
 
@@ -39,7 +37,8 @@ class DiReEVoC:
         Finest-granularity cluster size for EVoC's base layer.
     use_gpu : {"auto", True, False}, default="auto"
         Whether to build the single-linkage tree on the GPU (cuML). "auto" uses the GPU
-        iff cuML imports. The two paths give the same clustering; GPU wins at large n.
+        iff cuML imports. The DiRe layout can still use its own acceleration when this
+        is false; this flag controls the EVoC-phase hybrid.
     selector : {"silhouette", "silhouette_raw", "base", "none"}, default="silhouette"
         How to pick the operative layer for ``labels_``. "silhouette" uses
         COVERAGE-WEIGHTED silhouette (mean silhouette over all points, noise scored 0) --
@@ -55,13 +54,13 @@ class DiReEVoC:
 
     Attributes
     ----------
-    layout_ : ndarray (n, n_components)        the DiRe layout
-    labels_ : ndarray (n,)                     operative-layer cluster labels (-1 = noise)
-    membership_ : ndarray (n,)                 per-point membership strength of that layer
-    cluster_layers_ : list of ndarray          all EVoC layers (fine -> coarse)
-    intrinsic_dimension_ : float               TwoNN ID read off DiRe's kNN graph
-    reducer_ : the fitted DiRe reducer
-    selected_layer_ : int                      index into cluster_layers_ chosen for labels_
+    ``layout_`` : ndarray (n, n_components)        the DiRe layout
+    ``labels_`` : ndarray (n,)                     operative-layer cluster labels (-1 = noise)
+    ``membership_`` : ndarray (n,)                 per-point membership strength of that layer
+    ``cluster_layers_`` : list of ndarray          all EVoC layers (fine -> coarse)
+    ``intrinsic_dimension_`` : float               TwoNN ID read off DiRe's kNN graph
+    ``reducer_`` : the fitted DiRe reducer
+    ``selected_layer_`` : int                      index into ``cluster_layers_`` chosen for ``labels_``
     """
 
     def __init__(self, n_components=8, metric="cosine", min_samples=10,
@@ -118,9 +117,10 @@ class DiReEVoC:
         The fix: score the mean silhouette over *all* sampled points, with noise points
         contributing 0. That equals ``silhouette(clustered) * coverage`` (coverage =
         fraction non-noise), since silhouette_score is the mean of the per-point values.
-        It rewards layers that are both well-separated AND explain the data, and drops
-        ARI-regret to ~0 across synth/MNIST/20NG (the last being the case plain
-        silhouette could not solve). ``selector="silhouette_raw"`` keeps the old behaviour.
+        It rewards layers that are both well-separated AND explain the data. It is still
+        a heuristic: the CUDA benchmark suite includes a synthetic case where the layout
+        contains the right fixed-k clustering but the selector chooses too coarse a layer.
+        ``selector="silhouette_raw"`` keeps the old behaviour.
         """
         if self.selector == "base" or len(layers) == 1:
             return 0

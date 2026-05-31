@@ -69,10 +69,11 @@ layers, memberships, persistence = hybrid_cluster_layers(layout, min_samples=10)
 ```
 
 `hybrid_cluster_layers` builds the single-linkage tree on the GPU and feeds it to EVoC's
-condense/persistence/layer post-process via `build_cluster_layers(..., precomputed_linkage=slt)`.
-The clustering is identical to native EVoC (validated ARI = 1.0 at fixed k); the GPU wins
-on throughput at large n (≈ 2.7× at 1M points on 8 CPU threads), while at small n / many
-cores the CPU baseline is faster.
+condense/persistence/layer post-process. If EVoC exposes
+`build_cluster_layers(..., precomputed_linkage=slt)`, that seam is used; otherwise
+`dire-evoc` calls EVoC's tree utilities directly. On the CUDA benchmark run, the
+EVoC-on-layout phase was fast (0.38-0.96s for the checked examples), while DiRe layout
+construction dominated end-to-end time.
 
 ## 4. Out-of-sample assignment — `predict`
 
