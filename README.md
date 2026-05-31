@@ -27,12 +27,44 @@ top of it this package provides:
   time (at 1M points) building the single-linkage tree — which is exactly HDBSCAN*'s SLT,
   and cuML builds that on the GPU. `gpu_single_linkage_tree()` returns it in EVoC's
   linkage format; EVoC's cheap O(n)-tree post-process (condense / persistence / layers)
-  runs unchanged. Measured ≈ 3.3× on Phase 2 at 1M points with identical clustering
-  (ARI = 1.0 at the meaningful granularity).
+  runs unchanged, with identical clustering (ARI = 1.0 at the meaningful granularity).
+  Throughput win is conditional: ≈ 2.7× on Phase 2 at 1M points **on 8 threads**, but the
+  CPU baseline wins at small n or high core count (see the honest note below).
 
 - **Out-of-sample assignment** (`dire_evoc.predict`). Label new points by a
   distance-weighted kNN vote over the training points in the original embedding space —
   sidestepping re-embedding into the transductive layout. Noise competes as a label.
+
+## What it does — and doesn't (honest value proposition)
+
+Measured, not asserted (see [`docs/benchmarks.md`](docs/benchmarks.md)):
+
+**Real wins**
+
+- **Better clustering on large, density-separated embedding data.** On Fashion-MNIST,
+  DiRe→EVoC scores ARI **0.395 vs 0.224** for EVoC on the raw embeddings; it also wins on
+  DBpedia-14 (0.623 vs 0.606) and 20-Newsgroups (0.214 vs 0.192). The DiRe layout is a
+  better substrate to cluster than EVoC's own embedding when there is enough data.
+- **Intrinsic dimension, free.** Read off the kNN graph DiRe already builds — no second
+  pass, no extra dependency, and metric-correct on the sphere.
+- **Out-of-sample `predict()`.** Assign new points to the fitted clustering. Upstream EVoC
+  has no predict at all.
+
+**Honest limits**
+
+- **Not a universal quality win.** It loses *narrowly* on MNIST (0.832 vs 0.903 — a layer-
+  granularity quirk, not the embedding), and is *worse* on tiny data (Olivetti, n=400): the
+  DiRe manifold optimization is data-hungry, so this is a **large-n method**.
+- **A hard partition is the wrong object on continuous manifolds** (e.g. arXiv abstracts:
+  both methods ≈ 0 ARI). There, the DiRe *layout itself* is the deliverable, not clusters.
+- **Speed is conditional, not a headline.** The GPU Phase-2 hybrid beats CPU EVoC's MST
+  step (~2.7× at 1M points / 8 threads) **only at large n and low core count**; on a
+  many-core box (e.g. a 64-core GH200) the CPU baseline wins, and *end-to-end* DiRe→EVoC is
+  slower than vanilla EVoC at typical sizes because building the DiRe layout isn't free.
+  Treat throughput as a regime-specific property, not a general claim.
+
+In one line: **better clustering on large density-separated data, plus free intrinsic
+dimension and out-of-sample prediction — with a conditional GPU speed-up at scale.**
 
 ## Install
 
