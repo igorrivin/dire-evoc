@@ -44,3 +44,26 @@ def test_pipeline_fit_predict_dimension():
 
     with pytest.raises(ValueError):
         model.predict(X[:, :5])
+
+
+def test_adaptive_min_samples_recovers_tight_blobs():
+    """Ultra-tight blobs make the DiRe layout tighter than EVoC's default smoothing
+    expects, so the base clustering over-fragments (~85% noise). The adaptive search
+    should escalate min_samples and recover a clean clustering; disabling it should not."""
+    X, y = _blobs(n=12000, k=8, d=32, spread=0.10)
+    from sklearn.metrics import adjusted_rand_score
+
+    adaptive = DiReEVoC(min_samples=10, adaptive_min_samples=True, random_state=0).fit(X)
+    fixed = DiReEVoC(min_samples=10, adaptive_min_samples=False, random_state=0).fit(X)
+
+    ari_adaptive = adjusted_rand_score(y, adaptive.labels_)
+    ari_fixed = adjusted_rand_score(y, fixed.labels_)
+
+    # Assert the MECHANISM, not an absolute ARI ceiling: the escalation must fire and must
+    # substantially beat the over-fragmented fixed base. The absolute ARI reaches 1.0 in
+    # isolation but wobbles with approximate cuVS-kNN nondeterminism / test-order GPU state,
+    # so a fixed high threshold would be flaky; the gap over the ~0.0 base is robust.
+    assert adaptive.selected_min_samples_ > adaptive.min_samples, "should have escalated"
+    assert ari_adaptive > ari_fixed + 0.3, (
+        f"adaptive ({ari_adaptive:.3f}) should beat the fixed-min_samples base ({ari_fixed:.3f})")
+    assert ari_adaptive > 0.5, f"adaptive should recover a real clustering, got {ari_adaptive:.3f}"

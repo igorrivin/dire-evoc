@@ -47,6 +47,16 @@ class DiReEVoC:
         suffers when a layer discards much of the data as noise. "silhouette_raw" is the
         old non-coverage-weighted behaviour; "base" uses the finest layer; "none" the
         coarsest.
+    adaptive_min_samples : bool, default=True
+        If the base clustering labels more than ``noise_gate`` of the points as noise --
+        the signature of a layout too tight for EVoC's default density smoothing (the
+        whole layer set comes out over-fragmented) -- re-cluster at larger ``min_samples``
+        and re-select by the same coverage-weighted score, adopting the result only if it
+        strictly beats the base. Genuinely diffuse data (continuous manifolds) keeps its
+        honest high-noise result because nothing beats it. Only active for the default
+        "silhouette" selector.
+    noise_gate : float, default=0.5
+        Noise fraction above which the adaptive ``min_samples`` search is triggered.
     n_neighbors_predict : int or None
         Neighbours for the out-of-sample vote; defaults to the DiRe ``n_neighbors``.
     random_state : int or None
@@ -62,10 +72,13 @@ class DiReEVoC:
     intrinsic_dimension_ : float               TwoNN ID read off DiRe's kNN graph
     reducer_ : the fitted DiRe reducer
     selected_layer_ : int                      index into cluster_layers_ chosen for labels_
+    selected_min_samples_ : int                min_samples actually used (> min_samples if
+                                               the adaptive search escalated it)
     """
 
     def __init__(self, n_components=8, metric="cosine", min_samples=10,
                  base_min_cluster_size=10, use_gpu="auto", selector="silhouette",
+                 adaptive_min_samples=True, noise_gate=0.5,
                  n_neighbors_predict=None, random_state=None, **dire_kwargs):
         self.n_components = n_components
         self.metric = metric
@@ -73,6 +86,8 @@ class DiReEVoC:
         self.base_min_cluster_size = base_min_cluster_size
         self.use_gpu = use_gpu
         self.selector = selector
+        self.adaptive_min_samples = adaptive_min_samples
+        self.noise_gate = noise_gate
         self.n_neighbors_predict = n_neighbors_predict
         self.random_state = random_state
         self.dire_kwargs = dire_kwargs
@@ -96,16 +111,17 @@ class DiReEVoC:
         layout = np.ascontiguousarray(reducer.fit_transform(X), dtype=np.float32)
         return layout, reducer
 
-    def _cluster(self, layout, on_gpu):
+    def _cluster(self, layout, on_gpu, min_samples=None):
+        ms = self.min_samples if min_samples is None else min_samples
         if on_gpu:
             from .hybrid import hybrid_cluster_layers
             return hybrid_cluster_layers(
-                layout, min_samples=self.min_samples,
+                layout, min_samples=ms,
                 base_min_cluster_size=self.base_min_cluster_size,
             )
         from evoc.clustering import build_cluster_layers
         return build_cluster_layers(
-            layout, min_samples=self.min_samples,
+            layout, min_samples=ms,
             base_min_cluster_size=self.base_min_cluster_size,
         )
 
@@ -122,29 +138,40 @@ class DiReEVoC:
         ARI-regret to ~0 across synth/MNIST/20NG (the last being the case plain
         silhouette could not solve). ``selector="silhouette_raw"`` keeps the old behaviour.
         """
-        if self.selector == "base" or len(layers) == 1:
-            return 0
-        if self.selector == "none":
-            return len(layers) - 1
+        return self._best_layer(layout, layers)[0]
+
+    def _layer_score(self, Xs, lab_sample):
+        """Coverage-weighted silhouette of one layer's labels on the sample.
+
+        ``silhouette(clustered) * coverage`` = mean silhouette over all points with noise
+        scored 0. Returns -inf for a degenerate layer (<2 clusters among the sample)."""
         from sklearn.metrics import silhouette_score
+        mask = lab_sample >= 0
+        if np.unique(lab_sample[mask]).size < 2:
+            return -np.inf
+        s = silhouette_score(Xs[mask], lab_sample[mask])
+        if self.selector != "silhouette_raw":
+            s *= mask.mean()
+        return float(s)
+
+    def _best_layer(self, layout, layers):
+        """Return (index, score) of the operative layer under the configured selector.
+
+        ``score`` is the coverage-weighted silhouette of the chosen layer, used both to
+        pick within a layer set and to compare candidate sets across ``min_samples``."""
         rng = np.random.default_rng(self.random_state)
         n = layout.shape[0]
-        sample = (rng.choice(n, 10_000, replace=False) if n > 10_000
-                  else np.arange(n))
+        sample = (rng.choice(n, 10_000, replace=False) if n > 10_000 else np.arange(n))
         Xs = layout[sample]
-        weight_by_coverage = self.selector != "silhouette_raw"
-        best_i, best_s = 0, -np.inf
-        for i, lab in enumerate(layers):
-            l = lab[sample]
-            mask = l >= 0
-            if np.unique(l[mask]).size < 2:        # need >=2 clusters to score
-                continue
-            s = silhouette_score(Xs[mask], l[mask])
-            if weight_by_coverage:
-                s *= mask.mean()                   # mean silhouette over ALL points (noise=0)
-            if s > best_s:
-                best_i, best_s = i, s
-        return best_i
+        if self.selector == "base" or len(layers) == 1:
+            i = 0
+        elif self.selector == "none":
+            i = len(layers) - 1
+        else:
+            scores = [self._layer_score(Xs, lab[sample]) for lab in layers]
+            i = int(np.argmax(scores))
+            return i, scores[i]
+        return i, self._layer_score(Xs, layers[i][sample])
 
     # -- API -----------------------------------------------------------------
     def fit(self, X, y=None):
@@ -152,13 +179,38 @@ class DiReEVoC:
         on_gpu = self._resolve_gpu()
         self.layout_, self.reducer_ = self._build_layout(X)
         layers, membership_layers, persistence = self._cluster(self.layout_, on_gpu)
+        sel, score = self._best_layer(self.layout_, layers)
+        self.selected_min_samples_ = self.min_samples
+
+        # Adaptive smoothing. If the base clustering calls more than `noise_gate` of the
+        # points noise, the DiRe layout is likely tighter than EVoC's default min_samples
+        # expects, so the whole layer set comes out over-fragmented (diagnosed on
+        # ultra-tight synthetic blobs: 85% noise at ms=10, ARI 1.0 at ms>=50). Re-cluster
+        # at larger min_samples and re-select by the SAME coverage-weighted score; adopt a
+        # higher min_samples only if it strictly beats the base. Genuinely diffuse data
+        # (continuous manifolds) keeps its honest high-noise result -- nothing beats it.
+        if (self.adaptive_min_samples and self.selector == "silhouette"
+                and (layers[sel] < 0).mean() > self.noise_gate):
+            best = (score, sel, layers, membership_layers, persistence, self.min_samples)
+            for factor in (2.5, 5.0):
+                ms = int(round(self.min_samples * factor))
+                if ms <= self.min_samples:
+                    continue
+                try:
+                    ls, lm, lp = self._cluster(self.layout_, on_gpu, min_samples=ms)
+                except Exception:
+                    continue
+                si, sc = self._best_layer(self.layout_, ls)
+                if sc > best[0]:
+                    best = (sc, si, ls, lm, lp, ms)
+            score, sel, layers, membership_layers, persistence, self.selected_min_samples_ = best
 
         self.cluster_layers_ = layers
         self.membership_strength_layers_ = membership_layers
         self.persistence_scores_ = persistence
-        self.selected_layer_ = self._select_layer(self.layout_, layers)
-        self.labels_ = layers[self.selected_layer_]
-        self.membership_ = membership_layers[self.selected_layer_]
+        self.selected_layer_ = sel
+        self.labels_ = layers[sel]
+        self.membership_ = membership_layers[sel]
 
         # free intrinsic dimension off DiRe's existing kNN graph
         try:
