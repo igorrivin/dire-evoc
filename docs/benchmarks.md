@@ -55,6 +55,27 @@ solved in general: synthetic blobs have perfect fixed-k substrate quality
 (`1.000 vs 1.000`), but DiReEVoC's selected layer is a coarse two-cluster partition with
 ARI `0.223`.
 
+## Adaptive `min_samples` (tight-substrate failure)
+
+A second, distinct failure (found by Alexander Kolpakov): on *ultra-tight* synthetic blobs
+(spread 0.10), DiRe→EVoC scored ARI ≈ 0.003 while fixed-k=8 gave 1.0. Diagnosis — **not**
+the selector and **not** the layout (true-label silhouette on the layout is 0.86, and
+fixed-k=8 → 1.0), but **layer generation**: at the default `min_samples=10` EVoC labels
+~85% of the points noise and over-fragments (k=28/51), so *every* layer in the set is
+degenerate and there is nothing good to select. It is DiRe-specific in degree because the
+DiRe layout is *tighter* than EVoC's own embedding (vanilla EVoC gets 0.87 here), so EVoC's
+default density smoothing is too local.
+
+No single `min_samples`/`base_min_cluster_size` default is robust — tight blobs need large
+smoothing, real text/image embeddings need small (`min_samples=25` hurts 20NG and Fashion).
+Fix (`adaptive_min_samples=True`, default): if the base clustering labels more than
+`noise_gate` (0.5) of points as noise, re-cluster at larger `min_samples` (2.5×, 5×) and
+re-select by the *same* coverage-weighted score, adopting a higher `min_samples` only if it
+strictly beats the base. Result: blobs recover **0.003 → 1.0** (escalating to
+`min_samples=50`), while every real dataset stays below the gate and is untouched
+(`selected_min_samples_` reports what was used). Genuinely diffuse data (continuous
+manifolds) keeps its honest high-noise result because no escalation beats it.
+
 ## Honest conclusion
 
 This CUDA run supports a narrower claim than the old README:
