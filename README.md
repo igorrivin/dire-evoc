@@ -73,11 +73,14 @@ labels, membership = knn_vote_predict(query, reference, train_labels, n_neighbor
 The strongest use case is medium-to-large embedding data where density-separated
 structure is present and the DiRe layout is a better clustering substrate than the raw
 vectors. The table below is from the checked CUDA Docker repro on an NVIDIA A10; see
-`docs/benchmarks.md` and `artifacts/cuda/manifest.json` after running the repro script.
+`docs/benchmarks.md` and the committed
+`artifacts/cuda-broad-163-192-33-223-fragment-merge2/` artifact tree.
 
 ![CUDA auto ARI comparison](docs/_static/benchmark_auto_ari.svg)
 
 ![CUDA auto ARI delta](docs/_static/benchmark_auto_delta.svg)
+
+![CUDA fit runtime comparison](docs/_static/benchmark_fit_seconds.svg)
 
 | Dataset | DiReEVoC auto ARI | Pure EVoC auto ARI | Notes |
 | --- | ---: | ---: | --- |
@@ -94,6 +97,26 @@ vectors. The table below is from the checked CUDA Docker repro on an NVIDIA A10;
 | Olivetti faces | 0.050 | 0.063 | Tiny data; both poor |
 | Forest CoverType | 0.016 | -0.006 | DiReEVoC slight win; both poor |
 | CIFAR-10 | 0.030 | 0.023 | Small raw-pixel stress test; both poor |
+
+Runtime from the same committed CUDA run:
+
+| Dataset | DiReEVoC fit | Pure EVoC fit |
+| --- | ---: | ---: |
+| Synthetic blobs 12k | 18.36s | 11.79s |
+| Synthetic moons 12k | 11.71s | 18.22s |
+| Synthetic circles 12k | 8.42s | 0.28s |
+| MNIST | 26.85s | 0.84s |
+| sklearn digits | 10.06s | 0.19s |
+| sklearn iris | 6.74s | 11.65s |
+| sklearn wine | 8.78s | 0.16s |
+| sklearn breast cancer | 7.09s | 0.18s |
+| Fashion-MNIST | 28.04s | 0.77s |
+| DBpedia-14 BGE-small | 37.42s | 0.77s |
+| Olivetti faces | 7.44s | 0.34s |
+| Forest CoverType | 25.35s | 0.62s |
+| CIFAR-10 | 9.85s | 0.42s |
+
+![CUDA fit runtime ratio](docs/_static/benchmark_fit_ratio.svg)
 
 The honest boundary:
 

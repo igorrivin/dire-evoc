@@ -44,6 +44,8 @@ capped because raw 3072-dimensional pixel kNN is memory-heavy on an A10.
 
 Timing from the same CUDA run:
 
+![CUDA fit runtime comparison](_static/benchmark_fit_seconds.svg)
+
 | dataset | DiReEVoC fit | pure EVoC fit | intrinsic dim | adaptive smoothing |
 |---|---:|---:|---:|---|
 | Synthetic blobs 12k | 18.36s | 11.79s | 22.51 | min_samples=10, base_min_cluster_size=100 |
@@ -59,6 +61,8 @@ Timing from the same CUDA run:
 | Olivetti faces | 7.44s | 0.34s | 5.21 | min_samples=10, base_min_cluster_size=10 |
 | Forest CoverType | 25.35s | 0.62s | 3.04 | min_samples=25, base_min_cluster_size=100 |
 | CIFAR-10 | 9.85s | 0.42s | 25.12 | min_samples=50, base_min_cluster_size=100 |
+
+![CUDA fit runtime ratio](_static/benchmark_fit_ratio.svg)
 
 ## Layer selection
 
