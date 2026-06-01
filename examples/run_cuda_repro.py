@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Run the CUDA-backed example/benchmark suite and collect reproducible artifacts.
 
-This is intentionally a thin orchestrator around the public examples. It records the
-commands, stdout/stderr, runtime, return code, dataset paths, metrics JSON, and SVG
-figures in one output directory.
+The default CUDA repro runs the quickstart plus the broad dataset visual benchmark suite
+from ``examples/benchmark_dataset_suite.py``. That suite compares DiReEVoC against pure
+EVoC for each dataset and writes per-dataset metrics/figures plus suite-level CSV/SVG
+summaries.
 
 Typical Docker run:
 
@@ -18,8 +19,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-
-import numpy as np
 
 
 def run_command(name: str, command: list[str], output_dir: Path) -> dict:
@@ -43,93 +42,89 @@ def run_command(name: str, command: list[str], output_dir: Path) -> dict:
     }
 
 
-def write_synthetic_npz(path: Path, n=12_000, k=8, d=32, spread=0.10, seed=0) -> None:
-    from benchmark_visuals import gaussian_blobs
-
-    X, y = gaussian_blobs(n=n, k=k, d=d, spread=spread, seed=seed)
-    np.savez(path, X=X, y=y)
-
-
-def prepare_datasets(output_dir: Path, include_dbpedia: bool) -> dict:
-    from prepare_datasets import dbpedia14, fashion_mnist, olivetti
-
-    dataset_dir = output_dir / "datasets"
-    dataset_dir.mkdir(parents=True, exist_ok=True)
-
-    paths = {
-        "synthetic": dataset_dir / "synthetic_blobs_12k.npz",
-        "fashion_mnist": dataset_dir / "fashion_mnist.npz",
-        "olivetti": dataset_dir / "olivetti.npz",
-    }
-    write_synthetic_npz(paths["synthetic"])
-    fashion_mnist(str(paths["fashion_mnist"]))
-    olivetti(str(paths["olivetti"]))
-
-    if include_dbpedia:
-        paths["dbpedia14"] = dataset_dir / "dbpedia14_bge_small.npz"
-        dbpedia14(str(paths["dbpedia14"]))
-
-    return {key: str(path) for key, path in paths.items()}
-
-
-def benchmark_visuals_command(
-    dataset: str,
-    label: str,
-    output_dir: Path,
-    *,
-    npz: str | None = None,
-    synthetic: bool = False,
-    subsample: int | None = None,
-    test_fraction: float = 0.0,
-) -> list[str]:
+def dataset_suite_command(args: argparse.Namespace, output_dir: Path) -> list[str]:
     command = [
         sys.executable,
-        "examples/benchmark_visuals.py",
-        "--label",
-        label,
+        "examples/benchmark_dataset_suite.py",
+        "--datasets",
+        args.datasets,
         "--output-dir",
-        str(output_dir / dataset),
+        str(output_dir),
         "--test-fraction",
-        str(test_fraction),
+        str(args.test_fraction),
+        "--seed",
+        str(args.seed),
+        "--min-samples",
+        str(args.min_samples),
+        "--base-min-cluster-size",
+        str(args.base_min_cluster_size),
+        "--n-components",
+        str(args.n_components),
+        "--n-neighbors",
+        str(args.n_neighbors),
+        "--predict-neighbors",
+        str(args.predict_neighbors),
+        "--max-iter-layout",
+        str(args.max_iter_layout),
+        "--use-gpu",
+        args.use_gpu,
+        "--selector",
+        args.selector,
     ]
-    if synthetic:
-        command.extend(["--synthetic-blobs", "--n-samples", "12000"])
-    else:
-        command.extend(["--npz", str(npz)])
-    if subsample is not None:
-        command.extend(["--subsample", str(subsample)])
+    if args.include_graphs:
+        command.append("--include-graphs")
+    if args.continue_on_error:
+        command.append("--continue-on-error")
+    if args.skip_existing:
+        command.append("--skip-existing")
+    if args.force_fetch:
+        command.append("--force-fetch")
+    if args.prefer_hf:
+        command.append("--prefer-hf")
+    if args.full:
+        command.append("--full")
+    if args.subsample is not None:
+        command.extend(["--subsample", str(args.subsample)])
+    if args.skip_fixed_k:
+        command.append("--skip-fixed-k")
     return command
-
-
-def benchmark_quality_command(
-    dataset: str,
-    label: str,
-    output_dir: Path,
-    npz: str,
-    *,
-    subsample: int | None = None,
-) -> tuple[str, list[str]]:
-    quality_dir = output_dir / "quality"
-    quality_dir.mkdir(parents=True, exist_ok=True)
-    command = [
-        sys.executable,
-        "examples/benchmark_quality.py",
-        "--npz",
-        npz,
-        "--label",
-        label,
-    ]
-    if subsample is not None:
-        command.extend(["--subsample", str(subsample)])
-    return f"benchmark_quality_{dataset}", command
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default="artifacts/cuda")
-    parser.add_argument("--skip-dbpedia", action="store_true")
-    parser.add_argument("--fashion-subsample", type=int, default=None)
-    parser.add_argument("--dbpedia-subsample", type=int, default=None)
+    parser.add_argument(
+        "--datasets",
+        default="default",
+        help="dataset suite selection: default, all, graphs, or comma-separated slugs",
+    )
+    parser.add_argument("--include-graphs", action="store_true")
+    parser.add_argument("--continue-on-error", action="store_true")
+    parser.add_argument("--skip-existing", action="store_true")
+    parser.add_argument("--force-fetch", action="store_true")
+    parser.add_argument(
+        "--prefer-hf",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="prefer declared mirrors for OpenML datasets; default is OpenML first, then sklearn/HF fallback",
+    )
+    parser.add_argument("--subsample", type=int, default=None)
+    parser.add_argument("--full", action="store_true")
+    parser.add_argument("--test-fraction", type=float, default=0.2)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--min-samples", type=int, default=10)
+    parser.add_argument("--base-min-cluster-size", type=int, default=10)
+    parser.add_argument("--n-components", type=int, default=8)
+    parser.add_argument("--n-neighbors", type=int, default=15)
+    parser.add_argument("--predict-neighbors", type=int, default=15)
+    parser.add_argument("--max-iter-layout", type=int, default=100)
+    parser.add_argument("--use-gpu", default="auto", choices=["auto", "true", "false"])
+    parser.add_argument(
+        "--selector",
+        default="silhouette",
+        choices=["silhouette", "silhouette_raw", "base", "none"],
+    )
+    parser.add_argument("--skip-fixed-k", action="store_true")
     return parser.parse_args()
 
 
@@ -140,100 +135,38 @@ def main() -> int:
 
     manifest = {
         "output_dir": str(output_dir),
-        "datasets": {},
+        "datasets": args.datasets,
+        "include_graphs": args.include_graphs,
+        "prefer_hf": args.prefer_hf,
         "runs": [],
     }
 
     manifest["runs"].append(
         run_command("quickstart", [sys.executable, "examples/quickstart.py"], output_dir)
     )
+    (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
-    t0 = time.perf_counter()
-    datasets = prepare_datasets(output_dir, include_dbpedia=not args.skip_dbpedia)
-    manifest["datasets"] = datasets
-    manifest["prepare_datasets_seconds"] = time.perf_counter() - t0
+    suite_command = dataset_suite_command(args, output_dir)
+    manifest["runs"].append(
+        run_command("benchmark_dataset_suite", suite_command, output_dir)
+    )
 
-    visual_runs = [
-        (
-            "benchmark_visuals_synthetic",
-            benchmark_visuals_command(
-                "synthetic_blobs_12k",
-                "Synthetic blobs 12k",
-                output_dir,
-                synthetic=True,
-                test_fraction=0.2,
-            ),
-        ),
-        (
-            "benchmark_visuals_olivetti",
-            benchmark_visuals_command(
-                "olivetti",
-                "Olivetti faces",
-                output_dir,
-                npz=datasets["olivetti"],
-            ),
-        ),
-        (
-            "benchmark_visuals_fashion_mnist",
-            benchmark_visuals_command(
-                "fashion_mnist",
-                "Fashion-MNIST",
-                output_dir,
-                npz=datasets["fashion_mnist"],
-                subsample=args.fashion_subsample,
-            ),
-        ),
-    ]
-    if "dbpedia14" in datasets:
-        visual_runs.append(
-            (
-                "benchmark_visuals_dbpedia14",
-                benchmark_visuals_command(
-                    "dbpedia14",
-                    "DBpedia-14 BGE-small",
-                    output_dir,
-                    npz=datasets["dbpedia14"],
-                    subsample=args.dbpedia_subsample,
-                ),
-            )
-        )
-
-    for name, command in visual_runs:
-        manifest["runs"].append(run_command(name, command, output_dir))
-        (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-
-    quality_runs = [
-        benchmark_quality_command(
-            "synthetic", "Synthetic blobs 12k", output_dir, datasets["synthetic"]
-        ),
-        benchmark_quality_command("olivetti", "Olivetti faces", output_dir, datasets["olivetti"]),
-        benchmark_quality_command(
-            "fashion_mnist",
-            "Fashion-MNIST",
-            output_dir,
-            datasets["fashion_mnist"],
-            subsample=args.fashion_subsample,
-        ),
-    ]
-    if "dbpedia14" in datasets:
-        quality_runs.append(
-            benchmark_quality_command(
-                "dbpedia14",
-                "DBpedia-14 BGE-small",
-                output_dir,
-                datasets["dbpedia14"],
-                subsample=args.dbpedia_subsample,
-            )
-        )
-
-    for name, command in quality_runs:
-        manifest["runs"].append(run_command(name, command, output_dir))
-        (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    suite_manifest_path = output_dir / "manifest.json"
+    suite_manifest = None
+    if suite_manifest_path.exists():
+        suite_manifest = json.loads(suite_manifest_path.read_text())
 
     failures = [run for run in manifest["runs"] if run["returncode"] != 0]
     manifest["success"] = not failures
     manifest["failed_runs"] = [run["name"] for run in failures]
-    (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    manifest["suite_manifest"] = suite_manifest
+    manifest["summary_csv"] = str(output_dir / "suite_metrics.csv")
+    manifest["summary_svgs"] = [
+        str(output_dir / "suite_auto_ari.svg"),
+        str(output_dir / "suite_auto_delta.svg"),
+        str(output_dir / "suite_fit_seconds.svg"),
+    ]
+    (output_dir / "cuda_repro_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(json.dumps(manifest, indent=2))
     return 1 if failures else 0
 

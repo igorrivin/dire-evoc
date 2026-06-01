@@ -48,6 +48,10 @@ Package layout
 ``examples/benchmark_visuals.py``
    Reproducible benchmark/profile runner that writes JSON, CSV, and SVG figures.
 
+``examples/benchmark_dataset_suite.py``
+   Fetches/caches a broader labeled dataset suite and runs ``benchmark_visuals.py`` for
+   each dataset to compare DiReEVoC against pure EVoC.
+
 ``examples/run_cuda_repro.py``
    Runs the bundled CUDA examples and benchmarks and writes one artifact tree with a
    manifest, logs, metrics JSON/CSV, datasets, and SVG figures.

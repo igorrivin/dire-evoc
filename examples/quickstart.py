@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Minimal DiReEVoC quickstart: fit, intrinsic dimension, out-of-sample predict.
 
-Requires the GPU stack (dire-rapids + cuml + evoc). Run, e.g.:
-    conda run --no-capture-output -n rapids-26.04 python examples/quickstart.py
+Requires the GPU stack (dire-rapids + RAPIDS/cuML + evoc). Run, e.g.:
+    python examples/quickstart.py
 """
 import numpy as np
 from sklearn.metrics import adjusted_rand_score

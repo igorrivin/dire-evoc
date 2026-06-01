@@ -79,20 +79,30 @@ vectors. The table below is from the checked CUDA Docker repro on an NVIDIA A10;
 
 ![CUDA auto ARI delta](docs/_static/benchmark_auto_delta.svg)
 
-| Dataset | DiReEVoC auto ARI | Vanilla EVoC auto ARI | Notes |
+| Dataset | DiReEVoC auto ARI | Pure EVoC auto ARI | Notes |
 | --- | ---: | ---: | --- |
-| DBpedia-14 BGE-small | 0.612 | 0.572 | DiReEVoC win; fixed-k also wins |
-| Fashion-MNIST | 0.360 | 0.323 | DiReEVoC win; stronger at fixed-k |
-| Olivetti faces | 0.073 | 0.057 | Tiny data; both poor; fixed-k loses |
-| Synthetic blobs 12k | 0.223 | 1.000 | Selector failure; fixed-k is 1.000 vs 1.000 |
+| Synthetic blobs 12k | 1.000 | 1.000 | Adaptive smoothing recovers the perfect layer |
+| Synthetic moons 12k | 0.524 | 0.350 | Graph fragment merge fixes the split-layer failure; fixed-k ties |
+| Synthetic circles 12k | 0.279 | 0.037 | Graph fragment merge improves the selected layer; fixed-k ties |
+| MNIST | 0.656 | 0.813 | Pure EVoC wins in this 24k HF-backed run |
+| sklearn digits | 0.261 | 0.282 | Small image data; fixed-k favors Pure EVoC |
+| sklearn iris | 0.588 | 0.236 | DiReEVoC auto win; fixed-k is close |
+| sklearn wine | 0.000 | 0.121 | Pure EVoC auto win; fixed-k favors DiReEVoC |
+| sklearn breast cancer | 0.630 | 0.116 | DiReEVoC win; graph fragment merge recovers the binary split |
+| Fashion-MNIST | 0.440 | 0.390 | DiReEVoC win; stronger at fixed-k |
+| DBpedia-14 BGE-small | 0.608 | 0.623 | Pure EVoC slightly wins in this 39.2k run |
+| Olivetti faces | 0.050 | 0.063 | Tiny data; both poor |
+| Forest CoverType | 0.016 | -0.006 | DiReEVoC slight win; both poor |
+| CIFAR-10 | 0.030 | 0.023 | Small raw-pixel stress test; both poor |
 
 The honest boundary:
 
 - This is not a universal clustering-quality win.
 - DiRe is data-hungry; tiny datasets are a poor fit.
-- Layer selection is still a real failure mode: on the synthetic blobs run, the DiRe
-  layout contains the correct fixed-k clustering, but the unsupervised selector chooses a
-  coarse two-cluster layer.
+- Layer selection is still a real failure mode. The graph fragment merge fixes the
+  obvious moons/circles over-fragmentation, but MNIST, digits, Fashion-MNIST, DBpedia,
+  Olivetti, and CoverType correctly reject collapses to one cluster and keep their
+  selected layers.
 - A hard partition is often the wrong object on continuous manifolds. In that case,
   inspect the layout and intrinsic dimension before trusting cluster labels.
 - The GPU Phase-2 speedup is regime-dependent. It helps at large `n` and low CPU core
@@ -141,9 +151,28 @@ python examples/benchmark_visuals.py --synthetic-blobs --n-samples 12000 \
 ```
 
 The visual benchmark example writes `metrics.json`, `metrics.csv`, `quality_ari.svg`,
-`timing_breakdown.svg`, and `diagnostics.svg`. It reports DiReEVoC versus vanilla EVoC,
+`timing_breakdown.svg`, and `diagnostics.svg`. It reports DiReEVoC versus pure EVoC,
 phase timings, intrinsic dimension from DiRe's existing kNN graph, selected-layer noise,
 cluster counts, and optional hold-out prediction metrics.
+
+Run a broader dataset suite against the same pure EVoC baseline:
+
+```bash
+python examples/benchmark_dataset_suite.py --list-datasets
+python examples/benchmark_dataset_suite.py --datasets default \
+  --output-dir artifacts/dataset-suite --test-fraction 0.2
+```
+
+The default suite includes synthetic blobs, moons, circles, sklearn digits, iris, wine,
+breast cancer, MNIST, Fashion-MNIST, DBpedia-14 embeddings, Olivetti faces, Forest
+CoverType, and CIFAR-10. OpenML is tried first by default. If OpenML fails, datasets that
+are fully available in sklearn use the sklearn fallback first, as Forest CoverType does
+through `fetch_covtype`; other mirrored OpenML datasets fall back to Hugging Face
+(`ylecun/mnist`, `zalando-datasets/fashion_mnist`, or `uoft-cs/cifar10`).
+OpenML-only datasets such as USPS, SVHN, UMIST faces, Letter,
+OptDigits, PenDigits, SatImage, Segment, and Vehicle remain available by explicit slug.
+Optional graph-feature datasets include Wiki-CS, Facebook Page-Page, and OGBN-Arxiv when
+their extra loaders are installed.
 
 Run the full CUDA Docker repro on a CUDA host and download the artifacts locally:
 

@@ -74,11 +74,16 @@ class DiReEVoC:
                                                ``labels_``
     selected_min_samples_ : int                min_samples actually used (> min_samples if
                                                the adaptive search escalated it)
+    selected_base_min_cluster_size_ : int      base_min_cluster_size actually used
     """
 
     def __init__(self, n_components=8, metric="cosine", min_samples=10,
                  base_min_cluster_size=10, use_gpu="auto", selector="silhouette",
                  adaptive_min_samples=True, noise_gate=0.5,
+                 merge_fragments=True, fragment_merge_min_edges=3,
+                 fragment_merge_edge_fraction=0.01,
+                 fragment_merge_min_score_ratio=0.25,
+                 gpu_cluster_min_samples=1000,
                  n_neighbors_predict=None, random_state=None, **dire_kwargs):
         self.n_components = n_components
         self.metric = metric
@@ -88,6 +93,11 @@ class DiReEVoC:
         self.selector = selector
         self.adaptive_min_samples = adaptive_min_samples
         self.noise_gate = noise_gate
+        self.merge_fragments = merge_fragments
+        self.fragment_merge_min_edges = fragment_merge_min_edges
+        self.fragment_merge_edge_fraction = fragment_merge_edge_fraction
+        self.fragment_merge_min_score_ratio = fragment_merge_min_score_ratio
+        self.gpu_cluster_min_samples = gpu_cluster_min_samples
         self.n_neighbors_predict = n_neighbors_predict
         self.random_state = random_state
         self.dire_kwargs = dire_kwargs
@@ -111,18 +121,23 @@ class DiReEVoC:
         layout = np.ascontiguousarray(reducer.fit_transform(X), dtype=np.float32)
         return layout, reducer
 
-    def _cluster(self, layout, on_gpu, min_samples=None):
+    def _cluster(self, layout, on_gpu, min_samples=None, base_min_cluster_size=None):
         ms = self.min_samples if min_samples is None else min_samples
-        if on_gpu:
+        bmc = (
+            self.base_min_cluster_size
+            if base_min_cluster_size is None
+            else base_min_cluster_size
+        )
+        if on_gpu and layout.shape[0] >= self.gpu_cluster_min_samples:
             from .hybrid import hybrid_cluster_layers
             return hybrid_cluster_layers(
                 layout, min_samples=ms,
-                base_min_cluster_size=self.base_min_cluster_size,
+                base_min_cluster_size=bmc,
             )
         from evoc.clustering import build_cluster_layers
         return build_cluster_layers(
             layout, min_samples=ms,
-            base_min_cluster_size=self.base_min_cluster_size,
+            base_min_cluster_size=bmc,
         )
 
     def _select_layer(self, layout, layers):
@@ -159,7 +174,7 @@ class DiReEVoC:
         """Return (index, score) of the operative layer under the configured selector.
 
         ``score`` is the coverage-weighted silhouette of the chosen layer, used both to
-        pick within a layer set and to compare candidate sets across ``min_samples``."""
+        pick within a layer set and to compare candidate sets across smoothing params."""
         rng = np.random.default_rng(self.random_state)
         n = layout.shape[0]
         sample = (rng.choice(n, 10_000, replace=False) if n > 10_000 else np.arange(n))
@@ -174,6 +189,258 @@ class DiReEVoC:
             return i, scores[i]
         return i, self._layer_score(Xs, layers[i][sample])
 
+    def _adaptive_smoothing_candidates(self):
+        """Smoothing candidates for tight layouts that over-fragment at defaults."""
+        min_samples_values = {
+            self.min_samples,
+            int(round(self.min_samples * 2.5)),
+            int(round(self.min_samples * 5.0)),
+        }
+        base_size_values = {
+            self.base_min_cluster_size,
+            int(round(self.base_min_cluster_size * 5.0)),
+            int(round(self.base_min_cluster_size * 10.0)),
+        }
+        candidates = []
+        seen = set()
+        for ms in sorted(value for value in min_samples_values if value > 0):
+            for bmc in sorted(value for value in base_size_values if value > 0):
+                key = (ms, bmc)
+                if key not in seen:
+                    seen.add(key)
+                    candidates.append(key)
+        return candidates
+
+    def _maybe_adapt_smoothing(
+        self,
+        layout,
+        on_gpu,
+        layers,
+        membership_layers,
+        persistence,
+        selected_layer,
+        score,
+    ):
+        """Escalate EVoC smoothing if the selected layer is mostly noise.
+
+        Tight DiRe layouts can make EVoC's default density smoothing under-shoot, so the
+        generated hierarchy contains only fragmented high-noise layers even when the
+        fixed-k substrate is excellent. Search a small grid over ``min_samples`` and
+        ``base_min_cluster_size`` and keep the candidate with the best unsupervised
+        coverage-weighted score. Diffuse data keeps its high-noise result when no
+        candidate improves the score.
+        """
+        selected_min_samples = self.min_samples
+        selected_base_min_cluster_size = self.base_min_cluster_size
+        if not (
+            self.adaptive_min_samples
+            and self.selector == "silhouette"
+            and (layers[0] < 0).mean() > self.noise_gate
+        ):
+            return (
+                score,
+                selected_layer,
+                layers,
+                membership_layers,
+                persistence,
+                selected_min_samples,
+                selected_base_min_cluster_size,
+            )
+
+        best = (
+            score,
+            selected_layer,
+            layers,
+            membership_layers,
+            persistence,
+            selected_min_samples,
+            selected_base_min_cluster_size,
+        )
+        for ms, bmc in self._adaptive_smoothing_candidates():
+            if ms == self.min_samples and bmc == self.base_min_cluster_size:
+                continue
+            try:
+                ls, lm, lp = self._cluster(
+                    layout,
+                    on_gpu,
+                    min_samples=ms,
+                    base_min_cluster_size=bmc,
+                )
+            except Exception:
+                continue
+            si, sc = self._best_layer(layout, ls)
+            if sc > best[0]:
+                best = (sc, si, ls, lm, lp, ms, bmc)
+        return best
+
+    def _fragment_merge_labels(self, labels, knn_indices):
+        """Merge selected-layer fragments using DiRe's original-space kNN graph.
+
+        This is deliberately graph-local rather than a generic penalty for high ``k``:
+        many separated blobs in low intrinsic dimension should stay separate. We only
+        union two selected clusters when they have enough *reciprocal* cross-neighbour
+        evidence in the existing kNN graph, the signature of adjacent pieces of one
+        continuous component.
+        """
+        labels = np.asarray(labels)
+        if knn_indices is None:
+            return labels, {"merged": False, "reason": "missing_knn"}
+        knn_indices = np.asarray(knn_indices)
+        if knn_indices.ndim != 2 or knn_indices.shape[0] != labels.shape[0]:
+            return labels, {"merged": False, "reason": "bad_knn_shape"}
+
+        active = labels >= 0
+        unique = np.unique(labels[active])
+        if unique.size < 3:
+            return labels, {"merged": False, "reason": "too_few_clusters"}
+
+        label_to_pos = {int(label): i for i, label in enumerate(unique)}
+        pos_to_label = {i: int(label) for label, i in label_to_pos.items()}
+        sizes = np.array([np.sum(labels == label) for label in unique], dtype=np.int64)
+        directed = {}
+        noise_bridges = {}
+        for i, lab in enumerate(labels):
+            if lab < 0:
+                neighbour_labels = []
+                for j in knn_indices[i]:
+                    if j < 0 or j >= labels.shape[0] or j == i:
+                        continue
+                    other = labels[int(j)]
+                    if other >= 0:
+                        neighbour_labels.append(label_to_pos[int(other)])
+                for offset, a in enumerate(sorted(set(neighbour_labels))):
+                    for b in sorted(set(neighbour_labels))[offset + 1:]:
+                        key = (a, b) if a < b else (b, a)
+                        noise_bridges[key] = noise_bridges.get(key, 0) + 1
+                continue
+            a = label_to_pos[int(lab)]
+            for j in knn_indices[i]:
+                if j < 0 or j >= labels.shape[0] or j == i:
+                    continue
+                other = labels[int(j)]
+                if other < 0 or other == lab:
+                    continue
+                b = label_to_pos[int(other)]
+                directed[(a, b)] = directed.get((a, b), 0) + 1
+
+        parent = np.arange(unique.size)
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a, b):
+            ra = find(a)
+            rb = find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        merged_edges = 0
+        for (a, b), count_ab in list(directed.items()):
+            if a >= b:
+                continue
+            reciprocal_edges = min(count_ab, directed.get((b, a), 0))
+            if reciprocal_edges < self.fragment_merge_min_edges:
+                continue
+            smaller = max(1, int(min(sizes[a], sizes[b])))
+            if reciprocal_edges / smaller >= self.fragment_merge_edge_fraction:
+                union(a, b)
+                merged_edges += 1
+
+        bridge_edges = 0
+        for (a, b), bridge_count in noise_bridges.items():
+            if bridge_count >= self.fragment_merge_min_edges:
+                union(a, b)
+                bridge_edges += 1
+
+        roots = np.array([find(i) for i in range(unique.size)])
+        if np.unique(roots).size == unique.size:
+            return labels, {
+                "merged": False,
+                "reason": "no_strong_adjacencies",
+                "candidate_edges": int(len(directed)),
+                "candidate_bridges": int(len(noise_bridges)),
+            }
+
+        root_to_new = {
+            root: new_label
+            for new_label, root in enumerate(sorted(np.unique(roots)))
+        }
+        merged_labels = labels.copy()
+        for old_pos, old_label in pos_to_label.items():
+            merged_labels[labels == old_label] = root_to_new[find(old_pos)]
+        return merged_labels, {
+            "merged": True,
+            "merged_edges": int(merged_edges),
+            "bridge_edges": int(bridge_edges),
+            "clusters_before": int(unique.size),
+            "clusters_after": int(np.unique(merged_labels[merged_labels >= 0]).size),
+        }
+
+    def _maybe_merge_fragments(
+        self,
+        layout,
+        layers,
+        membership_layers,
+        persistence,
+        selected_layer,
+        reducer,
+    ):
+        if not (self.merge_fragments and self.selector == "silhouette"):
+            return layers, membership_layers, persistence, selected_layer, {
+                "merged": False,
+                "reason": "disabled",
+            }
+
+        merged_labels, info = self._fragment_merge_labels(
+            layers[selected_layer],
+            getattr(reducer, "_knn_indices", None),
+        )
+        if not info.get("merged"):
+            return layers, membership_layers, persistence, selected_layer, info
+
+        base_score = self._layer_score(layout, layers[selected_layer])
+        merged_score = self._layer_score(layout, merged_labels)
+        clusters_after = int(np.unique(merged_labels[merged_labels >= 0]).size)
+        if clusters_after < 2:
+            info = dict(info)
+            info.update(
+                {
+                    "merged": False,
+                    "reason": "collapsed_to_one_cluster",
+                    "base_score": float(base_score),
+                    "merged_score": float(merged_score),
+                }
+            )
+            return layers, membership_layers, persistence, selected_layer, info
+        if (
+            np.isfinite(base_score)
+            and base_score > 0
+            and (
+                not np.isfinite(merged_score)
+                or merged_score < base_score * self.fragment_merge_min_score_ratio
+            )
+        ):
+            info = dict(info)
+            info.update(
+                {
+                    "merged": False,
+                    "reason": "score_loss_too_large",
+                    "base_score": float(base_score),
+                    "merged_score": float(merged_score),
+                }
+            )
+            return layers, membership_layers, persistence, selected_layer, info
+
+        info = dict(info)
+        info.update({"base_score": float(base_score), "merged_score": float(merged_score)})
+        layers = list(layers) + [merged_labels]
+        membership_layers = list(membership_layers) + [membership_layers[selected_layer]]
+        persistence = list(persistence) + [np.nan]
+        return layers, membership_layers, persistence, len(layers) - 1, info
+
     # -- API -----------------------------------------------------------------
     def fit(self, X, y=None):
         X = np.ascontiguousarray(X)
@@ -181,30 +448,37 @@ class DiReEVoC:
         self.layout_, self.reducer_ = self._build_layout(X)
         layers, membership_layers, persistence = self._cluster(self.layout_, on_gpu)
         sel, score = self._best_layer(self.layout_, layers)
-        self.selected_min_samples_ = self.min_samples
-
-        # Adaptive smoothing. If the base clustering calls more than `noise_gate` of the
-        # points noise, the DiRe layout is likely tighter than EVoC's default min_samples
-        # expects, so the whole layer set comes out over-fragmented (diagnosed on
-        # ultra-tight synthetic blobs: 85% noise at ms=10, ARI 1.0 at ms>=50). Re-cluster
-        # at larger min_samples and re-select by the SAME coverage-weighted score; adopt a
-        # higher min_samples only if it strictly beats the base. Genuinely diffuse data
-        # (continuous manifolds) keeps its honest high-noise result -- nothing beats it.
-        if (self.adaptive_min_samples and self.selector == "silhouette"
-                and (layers[sel] < 0).mean() > self.noise_gate):
-            best = (score, sel, layers, membership_layers, persistence, self.min_samples)
-            for factor in (2.5, 5.0):
-                ms = int(round(self.min_samples * factor))
-                if ms <= self.min_samples:
-                    continue
-                try:
-                    ls, lm, lp = self._cluster(self.layout_, on_gpu, min_samples=ms)
-                except Exception:
-                    continue
-                si, sc = self._best_layer(self.layout_, ls)
-                if sc > best[0]:
-                    best = (sc, si, ls, lm, lp, ms)
-            score, sel, layers, membership_layers, persistence, self.selected_min_samples_ = best
+        (
+            score,
+            sel,
+            layers,
+            membership_layers,
+            persistence,
+            self.selected_min_samples_,
+            self.selected_base_min_cluster_size_,
+        ) = self._maybe_adapt_smoothing(
+            self.layout_,
+            on_gpu,
+            layers,
+            membership_layers,
+            persistence,
+            sel,
+            score,
+        )
+        (
+            layers,
+            membership_layers,
+            persistence,
+            sel,
+            self.fragment_merge_,
+        ) = self._maybe_merge_fragments(
+            self.layout_,
+            layers,
+            membership_layers,
+            persistence,
+            sel,
+            self.reducer_,
+        )
 
         self.cluster_layers_ = layers
         self.membership_strength_layers_ = membership_layers

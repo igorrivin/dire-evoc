@@ -93,16 +93,25 @@ if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
 fi
 
 remote_args=()
-for arg in "${REPRO_ARGS[@]}"; do
-  remote_args+=("$(printf '%q' "${arg}")")
-done
+if [[ ${#REPRO_ARGS[@]} -gt 0 ]]; then
+  for arg in "${REPRO_ARGS[@]}"; do
+    remote_args+=("$(printf '%q' "${arg}")")
+  done
+fi
+remote_args_string=""
+if [[ ${#remote_args[@]} -gt 0 ]]; then
+  remote_args_string="${remote_args[*]}"
+fi
 
 echo "running CUDA repro suite..."
+set +e
 ssh "${REMOTE}" "cd '${REMOTE_DIR}' && ${DOCKER} run --rm --gpus all \
   -v '${REMOTE_DIR}:/workspace/dire-evoc' \
   -w /workspace/dire-evoc \
   '${IMAGE}' \
-  python3 examples/run_cuda_repro.py --output-dir '${REMOTE_OUTPUT}' ${remote_args[*]}"
+  python3 examples/run_cuda_repro.py --output-dir '${REMOTE_OUTPUT}' ${remote_args_string}"
+run_status=$?
+set -e
 
 echo "downloading artifacts..."
 mkdir -p "${LOCAL_OUTPUT}"
@@ -112,3 +121,4 @@ echo "done"
 echo "manifest: ${LOCAL_OUTPUT}/manifest.json"
 echo "figures:  ${LOCAL_OUTPUT}/*/*.svg"
 echo "metrics:  ${LOCAL_OUTPUT}/*/metrics.json"
+exit "${run_status}"

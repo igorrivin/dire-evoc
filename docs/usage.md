@@ -32,8 +32,11 @@ labels_new = model.predict(X_new)                          # out-of-sample assig
 
 Key parameters: `n_components` (layout dim, default 8), `min_samples` (HDBSCAN* core
 distance), `selector` (`"silhouette"` default — the validated layer selector — or
-`"base"` for the finest layer), `use_gpu` (`"auto"`). Extra keywords are forwarded to
-`dire_rapids.create_dire` (e.g. `n_neighbors`, `max_iter_layout`).
+`"base"` for the finest layer), `adaptive_min_samples` (retry density smoothing when a
+tight layout produces mostly noise), `merge_fragments` (merge adjacent selected-layer
+fragments using DiRe's original-space kNN graph), and `use_gpu` (`"auto"`). Extra
+keywords are forwarded to `dire_rapids.create_dire` (e.g. `n_neighbors`,
+`max_iter_layout`).
 
 > **When is the partition the right object?** Density clustering assumes density-separated
 > structure. On continuous / high-noise manifolds a hard partition is the wrong object —
@@ -72,8 +75,8 @@ layers, memberships, persistence = hybrid_cluster_layers(layout, min_samples=10)
 condense/persistence/layer post-process. If EVoC exposes
 `build_cluster_layers(..., precomputed_linkage=slt)`, that seam is used; otherwise
 `dire-evoc` calls EVoC's tree utilities directly. On the CUDA benchmark run, the
-EVoC-on-layout phase was fast (0.38-0.96s for the checked examples), while DiRe layout
-construction dominated end-to-end time.
+EVoC-on-layout phase is usually small relative to DiRe layout construction, though the
+full 13-dataset repro shows that timings are strongly dataset- and backend-dependent.
 
 ## 4. Out-of-sample assignment — `predict`
 
@@ -86,3 +89,17 @@ from dire_evoc import prepare_reference, knn_vote_predict
 ref = prepare_reference(X_train)
 labels, membership = knn_vote_predict(prepare_reference(X_new), ref, train_labels, n_neighbors=15)
 ```
+
+## 5. Benchmark suite
+
+```bash
+python examples/benchmark_dataset_suite.py --list-datasets
+python examples/benchmark_dataset_suite.py --datasets default \
+  --output-dir artifacts/dataset-suite --test-fraction 0.2
+```
+
+The default suite compares DiReEVoC against pure EVoC on synthetic blobs, moons, circles,
+sklearn digits/iris/wine/breast-cancer/Olivetti, MNIST, Fashion-MNIST, DBpedia-14,
+Forest CoverType, and CIFAR-10. OpenML is tried first by default; sklearn-native OpenML
+datasets use sklearn as fallback, and other mirrored OpenML datasets use Hugging Face as
+fallback.

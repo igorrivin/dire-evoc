@@ -22,7 +22,8 @@ and checks three things on each dataset:
 Also exercises dire_evoc.intrinsic_dimension_from_dire on the fitted reducer -- the
 "free" intrinsic-dimension read off DiRe's existing kNN graph.
 
-Run: conda run --no-capture-output -n rapids-26.04 python -u scripts/validate_hybrid_e2e.py
+Run in the CUDA 12.8 / RAPIDS 26.2 Docker environment, for example:
+    python -u scripts/validate_hybrid_e2e.py
 """
 import os
 import sys

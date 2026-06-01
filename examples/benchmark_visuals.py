@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Profile DiReEVoC against vanilla EVoC and write reproducible visual outputs.
+"""Profile DiReEVoC against pure EVoC and write reproducible visual outputs.
 
 This extends ``benchmark_quality.py`` with the diagnostics that are useful when deciding
 whether the bottleneck is DiRe, EVoC, layer selection, or prediction:
@@ -140,6 +140,11 @@ def evaluate_auto_oracle(labels, layers, y):
 
 
 def fit_vanilla_evoc(X, y, args):
+    """Fit pure EVoC directly on the original feature vectors.
+
+    The returned metrics key remains ``vanilla_evoc`` for compatibility with existing
+    artifacts, but plots and logs call this baseline "Pure EVoC".
+    """
     from evoc import EVoC
 
     ev, fit_seconds = timed(
@@ -175,8 +180,46 @@ def fit_dire_evoc_profile(X_train, y_train, X_test, y_test, args):
     (layers, membership_layers, persistence), phases["evoc_cluster_seconds"] = timed(
         lambda: model._cluster(layout, on_gpu)
     )
-    selected_layer, phases["layer_selection_seconds"] = timed(
-        lambda: model._select_layer(layout, layers)
+    (selected_layer, selected_score), phases["layer_selection_seconds"] = timed(
+        lambda: model._best_layer(layout, layers)
+    )
+    (
+        (
+            selected_score,
+            selected_layer,
+            layers,
+            membership_layers,
+            persistence,
+            selected_min_samples,
+            selected_base_min_cluster_size,
+        ),
+        phases["adaptive_smoothing_seconds"],
+    ) = timed(
+        lambda: model._maybe_adapt_smoothing(
+            layout,
+            on_gpu,
+            layers,
+            membership_layers,
+            persistence,
+            selected_layer,
+            selected_score,
+        )
+    )
+    (
+        layers,
+        membership_layers,
+        persistence,
+        selected_layer,
+        fragment_merge,
+    ), phases["fragment_merge_seconds"] = timed(
+        lambda: model._maybe_merge_fragments(
+            layout,
+            layers,
+            membership_layers,
+            persistence,
+            selected_layer,
+            reducer,
+        )
     )
     labels = layers[selected_layer]
 
@@ -221,12 +264,17 @@ def fit_dire_evoc_profile(X_train, y_train, X_test, y_test, args):
                 phases["dire_layout_seconds"]
                 + phases["evoc_cluster_seconds"]
                 + phases["layer_selection_seconds"]
+                + phases["adaptive_smoothing_seconds"]
+                + phases["fragment_merge_seconds"]
                 + phases["intrinsic_dimension_seconds"]
                 + phases["prepare_reference_seconds"]
             ),
             "total_seconds": float(sum(v for v in phases.values() if isinstance(v, float))),
             "timings": phases,
             "selected_layer": int(selected_layer),
+            "selected_min_samples": int(selected_min_samples),
+            "selected_base_min_cluster_size": int(selected_base_min_cluster_size),
+            "fragment_merge": fragment_merge,
             "on_gpu": bool(on_gpu),
             "layout_shape": list(layout.shape),
             "intrinsic_dimension": None
@@ -334,7 +382,7 @@ def plot_quality(metrics, output_dir):
     width = 0.36
     fig, ax = plt.subplots(figsize=(7.6, 4.6))
     b1 = ax.bar(x - width / 2, dire_values, width, label="DiReEVoC", color=COLORS["dire"])
-    b2 = ax.bar(x + width / 2, evoc_values, width, label="Vanilla EVoC", color=COLORS["evoc"])
+    b2 = ax.bar(x + width / 2, evoc_values, width, label="Pure EVoC", color=COLORS["evoc"])
     ax.set_title("Quality comparison by selection regime")
     ax.set_ylabel("Adjusted Rand Index")
     ax.set_xticks(x)
@@ -353,12 +401,23 @@ def plot_timings(metrics, output_dir):
     import matplotlib.pyplot as plt
 
     timings = metrics["dire_evoc"]["timings"]
-    labels = ["Vanilla EVoC fit", "DiRe layout", "EVoC on layout", "Layer selector", "ID", "Predict"]
+    labels = [
+        "Pure EVoC fit",
+        "DiRe layout",
+        "EVoC on layout",
+        "Layer selector",
+        "Adaptive smoothing",
+        "Fragment merge",
+        "ID",
+        "Predict",
+    ]
     values = [
         metrics["vanilla_evoc"]["fit_seconds"],
         timings.get("dire_layout_seconds", 0.0),
         timings.get("evoc_cluster_seconds", 0.0),
         timings.get("layer_selection_seconds", 0.0),
+        timings.get("adaptive_smoothing_seconds", 0.0),
+        timings.get("fragment_merge_seconds", 0.0),
         timings.get("intrinsic_dimension_seconds", 0.0),
         timings.get("predict_seconds", 0.0),
     ]
@@ -366,6 +425,8 @@ def plot_timings(metrics, output_dir):
         COLORS["evoc"],
         COLORS["dire"],
         COLORS["dire"],
+        COLORS["neutral"],
+        COLORS["neutral"],
         COLORS["neutral"],
         COLORS["accent"],
         COLORS["accent"],
@@ -401,7 +462,7 @@ def plot_diagnostics(metrics, output_dir):
 
     fig, axes = plt.subplots(1, 3, figsize=(11.2, 4.0))
 
-    methods = ["DiReEVoC", "Vanilla EVoC"]
+    methods = ["DiReEVoC", "Pure EVoC"]
     noise = [
         100.0 * metrics["dire_evoc"]["auto_noise_fraction"],
         100.0 * metrics["vanilla_evoc"]["auto_noise_fraction"],
@@ -527,7 +588,7 @@ def main():
     if X_test is not None:
         print(f"holdout={X_test.shape}")
 
-    print("fitting vanilla EVoC...")
+    print("fitting pure EVoC...")
     _, vanilla = fit_vanilla_evoc(X_train, y_train, args)
 
     print("profiling DiReEVoC...")
@@ -562,7 +623,7 @@ def main():
     print(f"wrote metrics and SVG figures to {output_dir}")
     print(
         "auto ARI: "
-        f"DiReEVoC={dire['auto_ari']:.4f}, vanilla EVoC={vanilla['auto_ari']:.4f}"
+        f"DiReEVoC={dire['auto_ari']:.4f}, pure EVoC={vanilla['auto_ari']:.4f}"
     )
     print(
         "intrinsic dimension: "

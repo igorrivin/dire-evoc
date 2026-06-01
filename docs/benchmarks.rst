@@ -1,7 +1,7 @@
 Benchmarks
 ==========
 
-The benchmark scripts compare DiReEVoC against vanilla EVoC and separate three questions:
+The benchmark scripts compare DiReEVoC against pure EVoC and separate three questions:
 
 ``auto``
    The layer selected by the method out of the box.
@@ -20,46 +20,82 @@ conditional, not universal. These figures summarize the CUDA Docker repro on an 
 A10:
 
 .. image:: _static/benchmark_auto_ari.svg
-   :alt: Auto ARI benchmark comparison for DiReEVoC and vanilla EVoC
+   :alt: Auto ARI benchmark comparison for DiReEVoC and pure EVoC
 
 .. image:: _static/benchmark_auto_delta.svg
-   :alt: Auto ARI delta, DiReEVoC minus vanilla EVoC
+   :alt: Auto ARI delta, DiReEVoC minus pure EVoC
 
 .. list-table::
    :header-rows: 1
 
    * - Dataset
      - DiReEVoC auto ARI
-     - Vanilla EVoC auto ARI
+     - Pure EVoC auto ARI
      - Result
-   * - DBpedia-14 BGE-small
-     - 0.612
-     - 0.572
+   * - Synthetic blobs 12k
+     - 1.000
+     - 1.000
+     - Tie
+   * - Synthetic moons 12k
+     - 0.524
+     - 0.350
+     - DiReEVoC win after graph fragment merge
+   * - Synthetic circles 12k
+     - 0.279
+     - 0.037
+     - DiReEVoC win after graph fragment merge
+   * - MNIST
+     - 0.656
+     - 0.813
+     - Pure EVoC win
+   * - sklearn digits
+     - 0.261
+     - 0.282
+     - Pure EVoC slight win
+   * - sklearn iris
+     - 0.588
+     - 0.236
+     - DiReEVoC win
+   * - sklearn wine
+     - 0.000
+     - 0.121
+     - Pure EVoC win
+   * - sklearn breast cancer
+     - 0.630
+     - 0.116
      - DiReEVoC win
    * - Fashion-MNIST
-     - 0.360
-     - 0.323
+     - 0.440
+     - 0.390
      - DiReEVoC win
+   * - DBpedia-14 BGE-small
+     - 0.608
+     - 0.623
+     - Pure EVoC slight win
    * - Olivetti faces
-     - 0.073
-     - 0.057
-     - Both poor on tiny data
-   * - Synthetic blobs 12k
-     - 0.223
-     - 1.000
-     - DiReEVoC selector failure; fixed-k ties
+     - 0.050
+     - 0.063
+     - Tiny-data tie; both poor
+   * - Forest CoverType
+     - 0.016
+     - -0.006
+     - DiReEVoC slight win; both poor
+   * - CIFAR-10
+     - 0.030
+     - 0.023
+     - DiReEVoC slight win; both poor
 
 The fixed-k substrate comparison removes layer-selection and peak-granularity effects:
 
 .. image:: _static/benchmark_fixed_k_ari.svg
-   :alt: Fixed-k ARI benchmark comparison for DiReEVoC and vanilla EVoC
+   :alt: Fixed-k ARI benchmark comparison for DiReEVoC and pure EVoC
 
 Comparative metrics
 -------------------
 
 ``auto``
    The operational result: the layer selected by the method without looking at labels.
-   For DiReEVoC this is the coverage-weighted silhouette layer. For vanilla EVoC it is
+   For DiReEVoC this is the coverage-weighted silhouette layer. For pure EVoC it is
    EVoC's selected layer.
 
 ``layer``
@@ -74,7 +110,7 @@ Comparative metrics
 
 ``fixed-k``
    The base layer forced toward the known number of classes. This is the cleanest
-   substrate test because DiReEVoC and vanilla EVoC are compared at the same target
+   substrate test because DiReEVoC and pure EVoC are compared at the same target
    granularity.
 
 ``ARI`` and ``NMI``
@@ -100,11 +136,12 @@ Interpretation
 
 The practical map is:
 
-* DiReEVoC helps most on medium-to-large, density-separated embedding data.
+* DiReEVoC wins are dataset-dependent, not universal.
 * Tiny datasets do not give DiRe enough data to form a reliable manifold; Olivetti is a
-  weak result and fixed-k favors vanilla EVoC.
-* Layer selection remains a real failure mode. Synthetic blobs have perfect fixed-k
-  substrate quality, but the selected DiReEVoC layer is too coarse.
+  weak result and fixed-k favors pure EVoC.
+* Layer selection remains a real failure mode. The graph fragment merge fixes the
+  obvious moons/circles over-fragmentation, but several datasets still have much better
+  fixed-k substrate quality than selected-layer quality.
 * Continuous manifolds may not have a useful hard partition at all.
 * CUDA accelerates the single-linkage-tree bridge, but DiRe layout construction can still
   dominate end-to-end time.
@@ -112,11 +149,12 @@ The practical map is:
 Compared with ``master``
 ------------------------
 
-The old README was directionally right for DBpedia-14 and Fashion-MNIST, but the CUDA
-repro changes the magnitudes. Fashion-MNIST is now ``0.360`` vs ``0.323`` rather than
-``0.395`` vs ``0.224``; DBpedia-14 is ``0.612`` vs ``0.572`` rather than ``0.623`` vs
-``0.606``. The previous 20 Newsgroups, MNIST, and arXiv claims were not rerun in this
-CUDA pass and should be treated as historical until reproduced by the current harness.
+The old README was too broad. The CUDA repro now runs 13 datasets by default and records
+all per-dataset figures. Fashion-MNIST remains a DiReEVoC win (``0.440`` vs ``0.390``),
+moons and circles now win after graph fragment merging, but DBpedia-14 still slightly
+favors pure EVoC in this 39.2k run (``0.608`` vs ``0.623``). MNIST also favors pure EVoC
+(``0.656`` vs ``0.813``). Historical 20 Newsgroups and arXiv claims are not part of the
+default repro unless their loaders are enabled explicitly.
 
 Reproduce
 ---------

@@ -1,115 +1,120 @@
-# Quality benchmarks: does DiRe→EVoC beat vanilla EVoC?
+# Quality benchmarks: does DiRe->EVoC beat pure EVoC?
 
-Reproduce with `examples/benchmark_quality.py`. Each dataset is scored three ways, which
-separate *substrate quality* (is the DiRe layout a good thing to cluster?) from *selector
-quality* (does the layer-selection machinery pick the good clustering?):
+Reproduce with `examples/run_cuda_repro.py` or the SSH wrapper
+`scripts/run_remote_cuda_repro.sh`. Each dataset is scored three ways:
 
-- **auto** — operational, out-of-the-box: the layer the method actually selects.
-- **oracle** — best ARI over the layers the method *produced* (selector removed).
-- **fixed-k** — the base layer forced to `k = n_classes` on each substrate (peak-finding
-  and selection both removed; pure substrate at the true granularity).
+- **auto** - operational, out-of-the-box: the layer the method actually selects.
+- **oracle** - best ARI over layers the method produced; this removes selection error.
+- **fixed-k** - the base layer forced to `k = n_classes`, isolating substrate quality.
 
-"vanilla EVoC" = `EVoC.fit_predict` (EVoC's own node embedding + clustering). "DiReEVoC" =
-the same EVoC clustering on a DiRe layout. ARI is against ground-truth labels.
+"Pure EVoC" = `EVoC.fit_predict` on the original feature vectors. "DiReEVoC" = the same
+EVoC clustering on a DiRe layout. ARI is against ground-truth labels.
 
 ## CUDA results
 
 These numbers come from `scripts/run_remote_cuda_repro.sh` on an NVIDIA A10 using the
-Dockerfile in this repository. The full run completed successfully: quickstart, dataset
-preparation, visual benchmarks, and quality benchmarks all returned exit code 0. After
-running the repro, the local artifact tree is `artifacts/cuda/`.
+Dockerfile in this repository: CUDA 12.8 image, RAPIDS 26.2 Python packages. The run
+completed successfully: quickstart, the 13-dataset default suite, artifact generation,
+and artifact download all returned exit code 0. The local artifact tree is
+`artifacts/cuda-broad-163-192-33-223-fragment-merge2/`.
 
-Operational (auto) ARI vs ground truth:
+Operational auto ARI vs ground truth:
 
-| dataset | n | d | cls | DiReEVoC (auto) | vanilla EVoC (auto) | winner | fixed-k substrate |
-|---|---|---|---|---|---|---|---|
-| DBpedia-14 BGE-small | 49k | 384 | 14 | **0.612** (k=13, 13.4% noise) | 0.572 (k=14, 14.3% noise) | **DiRe +0.040** | DiRe 0.612 vs 0.572 |
-| Fashion-MNIST | 60k | 784 | 10 | **0.360** (k=14, 21.0% noise) | 0.323 (k=9, 23.9% noise) | **DiRe +0.037** | DiRe 0.398 vs 0.273 |
-| Olivetti faces | 400 | 4096 | 40 | **0.073** (k=5, 34.2% noise) | 0.057 (k=7, 43.0% noise) | DiRe +0.016, both poor | vanilla 0.021 vs 0.041 |
-| Synthetic blobs 12k | 12k | 32 | 8 | 0.223 (k=2, 0.0% noise) | **1.000** (k=8, 0.0% noise) | vanilla +0.777 | tie 1.000 vs 1.000 |
+| dataset | n train | d | cls | DiReEVoC auto | pure EVoC auto | delta | fixed-k substrate |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Synthetic blobs 12k | 9,600 | 32 | 8 | 1.000 | 1.000 | +0.000 | DiRe 1.000 vs 1.000 |
+| Synthetic moons 12k | 9,600 | 8 | 2 | 0.524 | 0.350 | +0.174 | DiRe 1.000 vs 1.000 |
+| Synthetic circles 12k | 9,600 | 8 | 2 | 0.279 | 0.037 | +0.241 | DiRe 1.000 vs 1.000 |
+| MNIST | 24,000 | 784 | 10 | 0.656 | 0.813 | -0.157 | DiRe 0.772 vs 0.848 |
+| sklearn digits | 1,438 | 64 | 10 | 0.261 | 0.282 | -0.021 | DiRe 0.805 vs 0.873 |
+| sklearn iris | 120 | 4 | 3 | 0.588 | 0.236 | +0.352 | DiRe 0.562 vs 0.582 |
+| sklearn wine | 142 | 13 | 3 | 0.000 | 0.121 | -0.121 | DiRe 0.411 vs 0.257 |
+| sklearn breast cancer | 455 | 30 | 2 | 0.630 | 0.116 | +0.514 | DiRe 0.669 vs 0.511 |
+| Fashion-MNIST | 24,000 | 784 | 10 | 0.440 | 0.390 | +0.049 | DiRe 0.398 vs 0.273 |
+| DBpedia-14 BGE-small | 39,200 | 384 | 14 | 0.608 | 0.623 | -0.015 | DiRe 0.560 vs 0.625 |
+| Olivetti faces | 320 | 4,096 | 40 | 0.050 | 0.063 | -0.014 | DiRe 0.014 vs 0.056 |
+| Forest CoverType | 40,000 | 54 | 7 | 0.016 | -0.006 | +0.022 | DiRe 0.006 vs -0.033 |
+| CIFAR-10 | 1,200 | 3,072 | 10 | 0.030 | 0.023 | +0.006 | DiRe 0.010 vs 0.008 |
 
-DBpedia-14 is a labeled vector store: DBpedia ontology entities embedded with
-BGE-small. Fashion-MNIST is the full 60k training split. Olivetti is a tiny-data stress
-case. Synthetic blobs are deliberately easy density-separated data; they expose a
-selector failure rather than a substrate failure.
+The code default is OpenML first, then fallback. The recorded remote artifact was rerun
+with the declared Hugging Face mirror option for MNIST, Fashion-MNIST, and CIFAR-10 after
+OpenML proved unreliable on that host. Forest CoverType used the sklearn `fetch_covtype`
+fallback directly because it is fully available in sklearn. CIFAR-10 is intentionally
+capped because raw 3072-dimensional pixel kNN is memory-heavy on an A10.
 
 Timing from the same CUDA run:
 
-| dataset | DiReEVoC fit | vanilla EVoC fit | DiRe layout | EVoC on DiRe layout | DiRe fixed-k layer | vanilla fixed-k fit | intrinsic dim |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| DBpedia-14 BGE-small | 16.45s | 1.06s | 14.20s | 0.76s | 0.25s | 1.15s | 25.19 |
-| Fashion-MNIST | 13.89s | 1.82s | 11.30s | 0.96s | 0.24s | 1.96s | 15.45 |
-| Olivetti faces | 7.92s | 0.27s | 7.53s | 0.38s | 0.00s | 0.19s | 5.44 |
-| Synthetic blobs 12k | 9.55s | 12.25s | 8.25s | 0.40s | 0.10s | 2.00s | 22.51 |
-
-The GPU-accelerated EVoC phase is small in these examples; DiRe layout construction is
-the dominant cost. That means quality and diagnostics are the main reasons to run the
-pipeline at these sizes, not end-to-end speed.
+| dataset | DiReEVoC fit | pure EVoC fit | intrinsic dim | adaptive smoothing |
+|---|---:|---:|---:|---|
+| Synthetic blobs 12k | 18.36s | 11.79s | 22.51 | min_samples=10, base_min_cluster_size=100 |
+| Synthetic moons 12k | 11.71s | 18.22s | 2.03 | min_samples=10, base_min_cluster_size=10 |
+| Synthetic circles 12k | 8.42s | 0.28s | 2.07 | min_samples=10, base_min_cluster_size=10 |
+| MNIST | 26.85s | 0.84s | 13.86 | min_samples=10, base_min_cluster_size=10 |
+| sklearn digits | 10.06s | 0.19s | 8.66 | min_samples=25, base_min_cluster_size=10 |
+| sklearn iris | 6.74s | 11.65s | 2.92 | min_samples=10, base_min_cluster_size=10 |
+| sklearn wine | 8.78s | 0.16s | 4.05 | min_samples=10, base_min_cluster_size=10 |
+| sklearn breast cancer | 7.09s | 0.18s | 3.61 | min_samples=10, base_min_cluster_size=10 |
+| Fashion-MNIST | 28.04s | 0.77s | 15.56 | min_samples=50, base_min_cluster_size=10 |
+| DBpedia-14 BGE-small | 37.42s | 0.77s | 25.69 | min_samples=50, base_min_cluster_size=10 |
+| Olivetti faces | 7.44s | 0.34s | 5.21 | min_samples=10, base_min_cluster_size=10 |
+| Forest CoverType | 25.35s | 0.62s | 3.04 | min_samples=25, base_min_cluster_size=100 |
+| CIFAR-10 | 9.85s | 0.42s | 25.12 | min_samples=50, base_min_cluster_size=100 |
 
 ## Layer selection
 
 `DiReEVoC` uses coverage-weighted silhouette by default: mean silhouette over all points,
 with noise contributing 0. This penalizes layers that score well only because they throw
 many points away as noise. The current CUDA run still shows that layer selection is not
-solved in general: synthetic blobs have perfect fixed-k substrate quality
-(`1.000 vs 1.000`), but DiReEVoC's selected layer is a coarse two-cluster partition with
-ARI `0.223`.
+solved in general: MNIST, digits, wine, and several tiny or raw-pixel datasets have much
+better fixed-k substrate scores than auto-selected scores.
 
-## Adaptive `min_samples` (tight-substrate failure)
+## Graph fragment merge
 
-A second, distinct failure (found by Alexander Kolpakov): on *ultra-tight* synthetic blobs
-(spread 0.10), DiRe→EVoC scored ARI ≈ 0.003 while fixed-k=8 gave 1.0. Diagnosis — **not**
-the selector and **not** the layout (true-label silhouette on the layout is 0.86, and
-fixed-k=8 → 1.0), but **layer generation**: at the default `min_samples=10` EVoC labels
-~85% of the points noise and over-fragments (k=28/51), so *every* layer in the set is
-degenerate and there is nothing good to select. It is DiRe-specific in degree because the
-DiRe layout is *tighter* than EVoC's own embedding (vanilla EVoC gets 0.87 here), so EVoC's
-default density smoothing is too local.
+Some DiRe layouts preserve the right connected geometry but EVoC emits adjacent pieces as
+separate density fragments. The pipeline now uses DiRe's original-space kNN graph to
+merge selected-layer fragments only when reciprocal cross-neighbor evidence or noise
+bridges support the merge. It rejects merges that collapse the selected layer to one
+cluster and rejects severe coverage-weighted-silhouette losses.
 
-No single `min_samples`/`base_min_cluster_size` default is robust — tight blobs need large
-smoothing, real text/image embeddings need small (`min_samples=25` hurts 20NG and Fashion).
-Fix (`adaptive_min_samples=True`, default): if the base clustering labels more than
-`noise_gate` (0.5) of points as noise, re-cluster at larger `min_samples` (2.5×, 5×) and
-re-select by the *same* coverage-weighted score, adopting a higher `min_samples` only if it
-strictly beats the base. Result: blobs recover **0.003 → 1.0** (escalating to
-`min_samples=50`), while every real dataset stays below the gate and is untouched
-(`selected_min_samples_` reports what was used). Genuinely diffuse data (continuous
-manifolds) keeps its honest high-noise result because no escalation beats it.
+In this run, fragment merging improves moons from the old `0.045` auto ARI to `0.524`
+and circles from `0.045` to `0.279`. It also improves breast cancer (`0.630` vs pure
+EVoC's `0.116`). Collapse-to-one merges are rejected on MNIST, digits, Fashion-MNIST,
+DBpedia-14, Olivetti, and Forest CoverType.
+
+## Adaptive smoothing
+
+The tight synthetic-blobs failure was a layer-generation failure: the DiRe layout had a
+perfect fixed-k substrate, but EVoC's default smoothing could generate only degenerate
+high-noise layers. The pipeline now retries a small grid of larger `min_samples` and
+`base_min_cluster_size` values when the base clustering is mostly noise, then re-selects
+using the same coverage-weighted score.
+
+In the broad CUDA run, blobs recover to `1.000` auto ARI using `min_samples=10` and
+`base_min_cluster_size=100`. The selected smoothing is recorded in
+`selected_min_samples_` and `selected_base_min_cluster_size_`.
 
 ## Honest conclusion
 
-This CUDA run supports a narrower claim than the old README:
+This run supports a narrower claim than the old README:
 
-- **Real medium/large datasets:** DiReEVoC wins on DBpedia-14 and Fashion-MNIST, and the
-  fixed-k substrate comparison is also better on both.
-- **Tiny data:** Olivetti is too small for a strong claim. Auto ARI is slightly higher for
-  DiReEVoC, but both are poor and fixed-k favors vanilla.
-- **Synthetic easy data:** the DiRe substrate can be perfect while the selected layer is
-  wrong. Do not hide selector failures behind fixed-k or oracle numbers.
-- **Speed:** EVoC-on-layout is fast; DiRe layout construction dominates end to end.
+- Wins are dataset-dependent. DiReEVoC wins on moons, circles, iris, breast cancer,
+  Fashion-MNIST, CoverType, and CIFAR-10; ties on blobs; and loses on MNIST, DBpedia-14,
+  digits, wine, and Olivetti in the auto metric.
+- Fixed-k can disagree with auto. Several datasets have good fixed-k substrate scores but
+  poor selected layers, so fixed-k and oracle numbers must not hide selector failures.
+- Tiny data and raw pixels are weak regimes. Olivetti, CIFAR-10, wine, and CoverType are
+  not strong quality wins in absolute ARI.
+- DiRe layout construction dominates end-to-end time except where pure EVoC itself is
+  slow.
 
 ## Compared with `master`
 
-The `master` README was partly true but too broad:
-
-- It claimed a Fashion-MNIST win of `0.395 vs 0.224`. The CUDA repro still shows a
-  Fashion-MNIST win, but smaller: `0.360 vs 0.323` auto ARI.
-- It claimed a DBpedia-14 win of `0.623 vs 0.606`. The CUDA repro still shows a
-  DBpedia-14 win, but with current numbers: `0.612 vs 0.572`.
-- It claimed Olivetti was essentially a tiny-data tie. The CUDA repro agrees on the
-  conclusion, but the fixed-k number is worse for DiReEVoC (`0.021 vs 0.041`).
-- It included 20 Newsgroups, MNIST, and arXiv claims that were not rerun in this CUDA
-  pass. They should be treated as historical notes until reproduced by
-  `examples/run_cuda_repro.py`.
-- It said the full hybrid path depended on an EVoC `precomputed_linkage` seam. The current
-  code no longer requires that seam: when it is absent, `dire_evoc.hybrid` calls EVoC's
-  existing tree utilities directly after cuML builds the single-linkage tree.
-
-## Caveat on methodology
-
-`base_n_clusters` extracts the requested k as the *base layer* but `EVoC.fit_predict`
-returns the *selected* layer (a different k) — compare `cluster_layers_[0]` on both sides
-for a fair fixed-k number (the harness does this).
+The `master` README was too broad. The CUDA repro now runs 13 datasets by default and
+records all per-dataset figures. Fashion-MNIST remains a DiReEVoC win (`0.440 vs
+0.390`), moons and circles now win after graph fragment merging, but DBpedia-14 still
+slightly favors pure EVoC in this 39.2k run (`0.608 vs 0.623`). MNIST also favors pure
+EVoC (`0.656 vs 0.813`). Historical 20 Newsgroups and arXiv claims are not part of the
+default repro unless their loaders are enabled explicitly.
 
 ## Reproduce
 
@@ -120,5 +125,5 @@ scripts/run_remote_cuda_repro.sh user@gpu-host
 ```
 
 This syncs the working tree to the host, builds the Docker image, runs
-`examples/run_cuda_repro.py`, and downloads all JSON, CSV, log, dataset, and SVG artifacts
-to `artifacts/cuda/`.
+`examples/run_cuda_repro.py`, and downloads all JSON, CSV, log, dataset, and SVG
+artifacts to `artifacts/cuda/`.

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Quality benchmark: DiReEVoC (cluster the DiRe layout) vs vanilla EVoC (cluster the raw
+"""Quality benchmark: DiReEVoC (cluster the DiRe layout) vs pure EVoC (cluster the raw
 embeddings), scored against ground-truth labels.
 
 The claim under test is that running EVoC on a DiRe layout gives *better* clustering
-quality than running EVoC directly on the high-dimensional embeddings -- and how
+quality than running pure EVoC directly on the high-dimensional embeddings -- and how
 universal that is across datasets. We report Adjusted Rand Index and NMI against the
 labels, the number of clusters found, the noise fraction, and wall-clock time, for both
 methods on the same data.
@@ -14,9 +14,9 @@ Data sources:
     --subsample N     cap the number of rows (stratified-ish random subsample)
 
 Examples:
-    conda run --no-capture-output -n rapids-26.04 python examples/benchmark_quality.py \
+    python examples/benchmark_quality.py \
         --npz /tmp/ng20_emb.npz --label "20 Newsgroups (BGE-384)"
-    conda run --no-capture-output -n rapids-26.04 python examples/benchmark_quality.py \
+    python examples/benchmark_quality.py \
         --openml Fashion-MNIST --subsample 30000
 """
 import argparse
@@ -94,11 +94,11 @@ def main():
     n_classes = len(np.unique(y))
     print(f"\n{label}: {X.shape[0]:,} x {X.shape[1]}  ({n_classes} classes)")
 
-    # vanilla EVoC: EVoC's own node embedding + clustering
+    # pure EVoC: EVoC's own node embedding + clustering on the original features
     from evoc import EVoC
     t0 = time.perf_counter()
     ev = EVoC(min_samples=args.min_samples, random_state=args.seed).fit(X)
-    ev_auto, ev_oracle = score("vanilla EVoC", ev.labels_, ev.cluster_layers_, y,
+    ev_auto, ev_oracle = score("pure EVoC", ev.labels_, ev.cluster_layers_, y,
                                time.perf_counter() - t0)
 
     # DiReEVoC: EVoC's clustering on a DiRe layout
@@ -124,10 +124,10 @@ def main():
     de_fk_ari = adjusted_rand_score(y, de_fk)
 
     def verdict(d, e):
-        return "DiRe WINS" if d > e + 0.01 else ("tie" if abs(d - e) <= 0.01 else "vanilla wins")
-    print(f"  -> auto    ARI (DiRe {de_auto:.4f} - vanilla {ev_auto:.4f}) = {de_auto - ev_auto:+.4f}  [{verdict(de_auto, ev_auto)}]   (operational)")
-    print(f"  -> oracle  ARI (DiRe {de_oracle:.4f} - vanilla {ev_oracle:.4f}) = {de_oracle - ev_oracle:+.4f}  [{verdict(de_oracle, ev_oracle)}]   (best produced layer)")
-    print(f"  -> fixed-k ARI (DiRe {de_fk_ari:.4f} - vanilla {ev_fk_ari:.4f}) = {de_fk_ari - ev_fk_ari:+.4f}  [{verdict(de_fk_ari, ev_fk_ari)}]   (pure substrate @ k={n_classes})")
+        return "DiRe WINS" if d > e + 0.01 else ("tie" if abs(d - e) <= 0.01 else "pure EVoC wins")
+    print(f"  -> auto    ARI (DiRe {de_auto:.4f} - pure EVoC {ev_auto:.4f}) = {de_auto - ev_auto:+.4f}  [{verdict(de_auto, ev_auto)}]   (operational)")
+    print(f"  -> oracle  ARI (DiRe {de_oracle:.4f} - pure EVoC {ev_oracle:.4f}) = {de_oracle - ev_oracle:+.4f}  [{verdict(de_oracle, ev_oracle)}]   (best produced layer)")
+    print(f"  -> fixed-k ARI (DiRe {de_fk_ari:.4f} - pure EVoC {ev_fk_ari:.4f}) = {de_fk_ari - ev_fk_ari:+.4f}  [{verdict(de_fk_ari, ev_fk_ari)}]   (pure substrate @ k={n_classes})")
 
 
 if __name__ == "__main__":

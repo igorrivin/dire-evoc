@@ -21,53 +21,23 @@ OUT = ROOT / "docs" / "_static"
 
 
 FALLBACK = [
-    {
-        "dataset": "DBpedia-14 BGE-small",
-        "n": 49000,
-        "d": 384,
-        "classes": 14,
-        "dire_auto": 0.6119548845413553,
-        "evoc_auto": 0.5715246720755588,
-        "dire_fixed": 0.6123469610019592,
-        "evoc_fixed": 0.5715246720755588,
-    },
-    {
-        "dataset": "Fashion-MNIST",
-        "n": 60000,
-        "d": 784,
-        "classes": 10,
-        "dire_auto": 0.36014040353610344,
-        "evoc_auto": 0.32284983623757796,
-        "dire_fixed": 0.39796536606907473,
-        "evoc_fixed": 0.27259050699260645,
-    },
-    {
-        "dataset": "Olivetti faces",
-        "n": 400,
-        "d": 4096,
-        "classes": 40,
-        "dire_auto": 0.07295727476998595,
-        "evoc_auto": 0.05666574354700534,
-        "dire_fixed": 0.02098216636204316,
-        "evoc_fixed": 0.04109347396703659,
-    },
-    {
-        "dataset": "Synthetic blobs 12k",
-        "n": 12000,
-        "d": 32,
-        "classes": 8,
-        "dire_auto": 0.2226520138450453,
-        "evoc_auto": 1.0,
-        "dire_fixed": 1.0,
-        "evoc_fixed": 1.0,
-    },
+    {"dataset": "Synthetic blobs 12k", "n": 9600, "d": 32, "classes": 8, "dire_auto": 1.0, "evoc_auto": 1.0, "dire_fixed": 1.0, "evoc_fixed": 1.0},
+    {"dataset": "Synthetic moons 12k", "n": 9600, "d": 8, "classes": 2, "dire_auto": 0.5241, "evoc_auto": 0.3500, "dire_fixed": 1.0, "evoc_fixed": 1.0},
+    {"dataset": "Synthetic circles 12k", "n": 9600, "d": 8, "classes": 2, "dire_auto": 0.2787, "evoc_auto": 0.0374, "dire_fixed": 1.0, "evoc_fixed": 1.0},
+    {"dataset": "MNIST", "n": 24000, "d": 784, "classes": 10, "dire_auto": 0.6558, "evoc_auto": 0.8128, "dire_fixed": 0.7715, "evoc_fixed": 0.8476},
+    {"dataset": "sklearn digits", "n": 1438, "d": 64, "classes": 10, "dire_auto": 0.2613, "evoc_auto": 0.2823, "dire_fixed": 0.8047, "evoc_fixed": 0.8725},
+    {"dataset": "sklearn iris", "n": 120, "d": 4, "classes": 3, "dire_auto": 0.5881, "evoc_auto": 0.2358, "dire_fixed": 0.5616, "evoc_fixed": 0.5817},
+    {"dataset": "sklearn wine", "n": 142, "d": 13, "classes": 3, "dire_auto": 0.0, "evoc_auto": 0.1215, "dire_fixed": 0.4111, "evoc_fixed": 0.2570},
+    {"dataset": "sklearn breast cancer", "n": 455, "d": 30, "classes": 2, "dire_auto": 0.6301, "evoc_auto": 0.1160, "dire_fixed": 0.6691, "evoc_fixed": 0.5108},
+    {"dataset": "Fashion-MNIST", "n": 24000, "d": 784, "classes": 10, "dire_auto": 0.4396, "evoc_auto": 0.3903, "dire_fixed": 0.3985, "evoc_fixed": 0.2729},
+    {"dataset": "DBpedia-14 BGE-small", "n": 39200, "d": 384, "classes": 14, "dire_auto": 0.6082, "evoc_auto": 0.6228, "dire_fixed": 0.5602, "evoc_fixed": 0.6252},
+    {"dataset": "Olivetti faces", "n": 320, "d": 4096, "classes": 40, "dire_auto": 0.0498, "evoc_auto": 0.0634, "dire_fixed": 0.0142, "evoc_fixed": 0.0564},
+    {"dataset": "Forest CoverType", "n": 40000, "d": 54, "classes": 7, "dire_auto": 0.0160, "evoc_auto": -0.0062, "dire_fixed": 0.0061, "evoc_fixed": -0.0327},
+    {"dataset": "CIFAR-10", "n": 1200, "d": 3072, "classes": 10, "dire_auto": 0.0296, "evoc_auto": 0.0232, "dire_fixed": 0.0101, "evoc_fixed": 0.0080},
 ]
 
 ORDER = {
-    "DBpedia-14 BGE-small": 0,
-    "Fashion-MNIST": 1,
-    "Olivetti faces": 2,
-    "Synthetic blobs 12k": 3,
+    row["dataset"]: i for i, row in enumerate(FALLBACK)
 }
 
 
@@ -128,14 +98,14 @@ def grouped_bar(
     x = np.arange(len(labels))
     width = 0.36
 
-    fig, ax = plt.subplots(figsize=(10.2, 4.9))
+    fig, ax = plt.subplots(figsize=(max(10.2, len(labels) * 0.78), 5.2))
     b1 = ax.bar(x - width / 2, dire, width, label="DiReEVoC", color="#2f6f9f")
-    b2 = ax.bar(x + width / 2, evoc, width, label="Vanilla EVoC", color="#c56b37")
+    b2 = ax.bar(x + width / 2, evoc, width, label="Pure EVoC", color="#c56b37")
     ax.set_title(title)
     ax.set_ylabel(ylabel)
     ax.set_ylim(0.0, 1.05)
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=22, ha="right")
+    ax.set_xticklabels(labels, rotation=32, ha="right")
     ax.legend(frameon=False, ncol=2)
     style_axis(ax)
     add_labels(ax, b1)
@@ -150,13 +120,13 @@ def delta_bar(rows: list[dict], path: Path) -> None:
     delta = np.array([row["dire_auto"] - row["evoc_auto"] for row in rows])
     colors = ["#2f6f9f" if value >= 0 else "#c56b37" for value in delta]
 
-    fig, ax = plt.subplots(figsize=(10.2, 4.6))
+    fig, ax = plt.subplots(figsize=(max(10.2, len(labels) * 0.78), 4.9))
     bars = ax.bar(np.arange(len(labels)), delta, color=colors)
     ax.axhline(0.0, color="#2b2b2b", linewidth=1)
-    ax.set_title("Auto ARI delta: DiReEVoC minus vanilla EVoC")
+    ax.set_title("Auto ARI delta: DiReEVoC minus Pure EVoC")
     ax.set_ylabel("Adjusted Rand Index delta")
     ax.set_xticks(np.arange(len(labels)))
-    ax.set_xticklabels(labels, rotation=22, ha="right")
+    ax.set_xticklabels(labels, rotation=32, ha="right")
     style_axis(ax)
     for bar, value in zip(bars, delta):
         offset = 3 if value >= 0 else -12
