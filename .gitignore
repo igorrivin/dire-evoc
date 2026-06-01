@@ -8,3 +8,5 @@ dist/
 *.npy
 *.npz
 .venv/
+artifacts/
+docs/_build/

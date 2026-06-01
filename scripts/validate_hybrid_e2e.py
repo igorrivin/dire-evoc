@@ -7,7 +7,7 @@ all the way through:
 
   DiRe.fit_transform -> layout
     -> evoc.build_cluster_layers(layout)                       (native CPU path)
-    -> dire_evoc.hybrid.hybrid_cluster_layers(layout)          (cuML GPU SLT -> seam)
+    -> dire_evoc.hybrid.hybrid_cluster_layers(layout)          (cuML GPU SLT -> EVoC post)
 
 and checks three things on each dataset:
 
@@ -22,7 +22,8 @@ and checks three things on each dataset:
 Also exercises dire_evoc.intrinsic_dimension_from_dire on the fitted reducer -- the
 "free" intrinsic-dimension read off DiRe's existing kNN graph.
 
-Run: conda run --no-capture-output -n rapids-26.04 python -u scripts/validate_hybrid_e2e.py
+Run in the CUDA 12.8 / RAPIDS 26.2 Docker environment, for example:
+    python -u scripts/validate_hybrid_e2e.py
 """
 import os
 import sys
@@ -36,11 +37,14 @@ import numpy as np
 import numba
 from sklearn.metrics import adjusted_rand_score as ari
 
-sys.path.insert(0, "/home/igor/devel/dire-rapids")
 from dire_rapids import create_dire                                  # noqa: E402
 from evoc.clustering import build_cluster_layers                    # noqa: E402
 from evoc.clustering_utilities import _binary_search_for_n_clusters  # noqa: E402
-from dire_evoc.hybrid import gpu_single_linkage_tree, hybrid_cluster_layers  # noqa: E402
+from dire_evoc.hybrid import (  # noqa: E402
+    _cluster_layers_from_linkage,
+    gpu_single_linkage_tree,
+    hybrid_cluster_layers,
+)
 from dire_evoc.dimension import intrinsic_dimension_from_dire        # noqa: E402
 
 MIN_SAMPLES = 10
@@ -108,7 +112,7 @@ def run(name, X, y, k_true):
     # ---- THROUGHPUT: native CPU vs hybrid (GPU SLT + CPU post) ----
     t0 = time.perf_counter(); build_cluster_layers(layout, min_samples=MIN_SAMPLES); t_nat = time.perf_counter() - t0
     t0 = time.perf_counter(); slt = gpu_single_linkage_tree(layout, min_samples=MIN_SAMPLES); t_slt = time.perf_counter() - t0
-    t0 = time.perf_counter(); build_cluster_layers(layout, min_samples=MIN_SAMPLES, precomputed_linkage=slt); t_post = time.perf_counter() - t0
+    t0 = time.perf_counter(); _cluster_layers_from_linkage(slt, n); t_post = time.perf_counter() - t0
     t_hyb = t_slt + t_post
     speed = t_nat / t_hyb if t_hyb else float("nan")
     print(f"\n  throughput (auto layers):")

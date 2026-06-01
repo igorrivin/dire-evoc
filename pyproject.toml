@@ -34,9 +34,11 @@ dependencies = [
 cluster = ["evoc"]
 # DiRe-RAPIDS reducer (provides the GPU layout + kNN graph)
 dire = ["dire-rapids"]
-# GPU single-linkage tree + device kNN
-rapids = ["cuml-cu12>=23.0.0", "cuvs-cu12>=23.0.0", "cupy-cuda12x>=10.0.0"]
+# GPU single-linkage tree + device kNN. cuML exposes the fitted single-linkage tree
+# through the CPU hdbscan package, so it is part of the practical RAPIDS runtime.
+rapids = ["cuml-cu12>=23.0.0", "cuvs-cu12>=23.0.0", "cupy-cuda12x>=10.0.0", "hdbscan>=0.8.40"]
 dev = ["pytest>=7.0.0", "pytest-cov", "pytest-timeout>=2.1.0", "black", "ruff"]
+docs = ["sphinx>=7.0.0", "matplotlib>=3.8.0"]
 
 [project.urls]
 Homepage = "https://github.com/igorrivin/dire-evoc"

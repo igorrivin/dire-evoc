@@ -9,7 +9,7 @@ HTTP 504); everything comes from HuggingFace or scikit-learn.
     DBpedia-14      ~49k x 384, 14 classes  (fancyzhx/dbpedia_14, embedded with BGE-small)
     Olivetti faces  400 x 4096, 40 classes  (sklearn; a small-n stress case)
 
-Run: conda run --no-capture-output -n rapids-26.04 python examples/prepare_datasets.py
+Run: python examples/prepare_datasets.py
 """
 import warnings; warnings.filterwarnings("ignore")
 import numpy as np
