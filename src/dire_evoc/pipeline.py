@@ -33,8 +33,11 @@ class DiReEVoC:
         Metric for DiRe's kNN graph (and the intrinsic-dimension geodesic conversion).
     min_samples : int, default=10
         EVoC / HDBSCAN* core-distance parameter. Shared by the CPU and GPU paths.
-    base_min_cluster_size : int, default=10
+    base_min_cluster_size : int, default=5
         Finest-granularity cluster size for EVoC's base layer.
+    base_n_clusters : int or None, default=None
+        Optional target number of clusters for the base layer. This is a benchmark/control
+        knob, not the default unsupervised mode.
     use_gpu : {"auto", True, False}, default="auto"
         Whether to build the single-linkage tree on the GPU (cuML). "auto" uses the GPU
         iff cuML imports. The DiRe layout can still use its own acceleration when this
@@ -78,7 +81,8 @@ class DiReEVoC:
     """
 
     def __init__(self, n_components=8, metric="cosine", min_samples=10,
-                 base_min_cluster_size=10, use_gpu="auto", selector="silhouette",
+                 base_min_cluster_size=5, base_n_clusters=None,
+                 use_gpu="auto", selector="silhouette",
                  adaptive_min_samples=True, noise_gate=0.5,
                  merge_fragments=True, fragment_merge_min_edges=3,
                  fragment_merge_edge_fraction=0.01,
@@ -89,6 +93,7 @@ class DiReEVoC:
         self.metric = metric
         self.min_samples = min_samples
         self.base_min_cluster_size = base_min_cluster_size
+        self.base_n_clusters = base_n_clusters
         self.use_gpu = use_gpu
         self.selector = selector
         self.adaptive_min_samples = adaptive_min_samples
@@ -133,11 +138,13 @@ class DiReEVoC:
             return hybrid_cluster_layers(
                 layout, min_samples=ms,
                 base_min_cluster_size=bmc,
+                base_n_clusters=self.base_n_clusters,
             )
         from evoc.clustering import build_cluster_layers
         return build_cluster_layers(
             layout, min_samples=ms,
             base_min_cluster_size=bmc,
+            base_n_clusters=self.base_n_clusters,
         )
 
     def _select_layer(self, layout, layers):

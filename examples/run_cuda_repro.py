@@ -56,8 +56,6 @@ def dataset_suite_command(args: argparse.Namespace, output_dir: Path) -> list[st
         str(args.seed),
         "--min-samples",
         str(args.min_samples),
-        "--base-min-cluster-size",
-        str(args.base_min_cluster_size),
         "--n-components",
         str(args.n_components),
         "--n-neighbors",
@@ -71,6 +69,10 @@ def dataset_suite_command(args: argparse.Namespace, output_dir: Path) -> list[st
         "--selector",
         args.selector,
     ]
+    if args.base_min_cluster_size is not None:
+        command.extend(["--base-min-cluster-size", str(args.base_min_cluster_size)])
+    if args.base_n_clusters is not None:
+        command.extend(["--base-n-clusters", str(args.base_n_clusters)])
     if args.include_graphs:
         command.append("--include-graphs")
     if args.continue_on_error:
@@ -113,7 +115,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--test-fraction", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--min-samples", type=int, default=10)
-    parser.add_argument("--base-min-cluster-size", type=int, default=10)
+    parser.add_argument("--base-min-cluster-size", type=int, default=None)
+    parser.add_argument("--base-n-clusters", type=int, default=None)
     parser.add_argument("--n-components", type=int, default=8)
     parser.add_argument("--n-neighbors", type=int, default=15)
     parser.add_argument("--predict-neighbors", type=int, default=15)
