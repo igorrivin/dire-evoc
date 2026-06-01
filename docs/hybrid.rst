@@ -54,5 +54,6 @@ or many-core CPU machines, EVoC's native CPU path can be faster.
 Correctness boundary
 --------------------
 
-The single-linkage tree depends on ``min_samples``. To compare native EVoC and the hybrid
-path directly, keep ``min_samples`` the same on both sides.
+The single-linkage tree depends on ``min_samples``. The extracted base layer also depends
+on ``base_min_cluster_size`` and, when used, ``base_n_clusters``. To compare native EVoC
+and the hybrid path directly, keep these controls the same on both sides.

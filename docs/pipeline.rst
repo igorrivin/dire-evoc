@@ -20,6 +20,7 @@ Basic use
        n_components=8,
        metric="cosine",
        min_samples=10,
+       base_min_cluster_size=5,
        selector="silhouette",
        random_state=0,
    ).fit(X)
@@ -70,6 +71,14 @@ Available selectors:
 
 ``"none"``
    Use the coarsest EVoC layer.
+
+Base-layer controls
+-------------------
+
+``base_min_cluster_size`` defaults to ``5``, matching EVoC's own default. Set
+``base_n_clusters`` only when you intentionally want a controlled benchmark target, such
+as the known two-cluster synthetic moons/circles examples. The broad benchmark suite
+passes the same base controls to DiReEVoC and pure EVoC.
 
 When to trust labels
 --------------------

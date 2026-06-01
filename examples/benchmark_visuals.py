@@ -148,7 +148,12 @@ def fit_vanilla_evoc(X, y, args):
     from evoc import EVoC
 
     ev, fit_seconds = timed(
-        lambda: EVoC(min_samples=args.min_samples, random_state=args.seed).fit(X)
+        lambda: EVoC(
+            min_samples=args.min_samples,
+            base_min_cluster_size=args.base_min_cluster_size,
+            base_n_clusters=args.base_n_clusters,
+            random_state=args.seed,
+        ).fit(X)
     )
     result = evaluate_auto_oracle(ev.labels_, ev.cluster_layers_, y)
     result["fit_seconds"] = fit_seconds
@@ -165,6 +170,7 @@ def fit_dire_evoc_profile(X_train, y_train, X_test, y_test, args):
         n_components=args.n_components,
         min_samples=args.min_samples,
         base_min_cluster_size=args.base_min_cluster_size,
+        base_n_clusters=args.base_n_clusters,
         use_gpu=args.use_gpu,
         selector=args.selector,
         random_state=args.seed,
@@ -538,7 +544,8 @@ def parse_args():
     p.add_argument("--test-fraction", type=float, default=0.0)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--min-samples", type=int, default=10)
-    p.add_argument("--base-min-cluster-size", type=int, default=10)
+    p.add_argument("--base-min-cluster-size", type=int, default=5)
+    p.add_argument("--base-n-clusters", type=int, default=None)
     p.add_argument("--n-components", type=int, default=8)
     p.add_argument("--n-neighbors", type=int, default=15)
     p.add_argument("--predict-neighbors", type=int, default=15)
@@ -608,6 +615,11 @@ def main():
             "n_test": 0 if X_test is None else int(X_test.shape[0]),
             "n_features": int(X.shape[1]),
             "n_classes": n_classes,
+            "min_samples": int(args.min_samples),
+            "base_min_cluster_size": int(args.base_min_cluster_size),
+            "base_n_clusters": None
+            if args.base_n_clusters is None
+            else int(args.base_n_clusters),
         },
         "vanilla_evoc": vanilla,
         "dire_evoc": dire,

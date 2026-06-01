@@ -31,12 +31,13 @@ labels_new = model.predict(X_new)                          # out-of-sample assig
 ```
 
 Key parameters: `n_components` (layout dim, default 8), `min_samples` (HDBSCAN* core
-distance), `selector` (`"silhouette"` default — the validated layer selector — or
-`"base"` for the finest layer), `adaptive_min_samples` (retry density smoothing when a
-tight layout produces mostly noise), `merge_fragments` (merge adjacent selected-layer
-fragments using DiRe's original-space kNN graph), and `use_gpu` (`"auto"`). Extra
-keywords are forwarded to `dire_rapids.create_dire` (e.g. `n_neighbors`,
-`max_iter_layout`).
+distance), `base_min_cluster_size` (EVoC base-layer size, default 5 to match EVoC),
+`base_n_clusters` (optional target base-layer cluster count for controlled benchmarks),
+`selector` (`"silhouette"` default — the validated layer selector — or `"base"` for the
+finest layer), `adaptive_min_samples` (retry density smoothing when a tight layout
+produces mostly noise), `merge_fragments` (merge adjacent selected-layer fragments using
+DiRe's original-space kNN graph), and `use_gpu` (`"auto"`). Extra keywords are forwarded
+to `dire_rapids.create_dire` (e.g. `n_neighbors`, `max_iter_layout`).
 
 > **When is the partition the right object?** Density clustering assumes density-separated
 > structure. On continuous / high-noise manifolds a hard partition is the wrong object —
@@ -102,4 +103,6 @@ The default suite compares DiReEVoC against pure EVoC on synthetic blobs, moons,
 sklearn digits/iris/wine/breast-cancer/Olivetti, MNIST, Fashion-MNIST, DBpedia-14,
 Forest CoverType, and CIFAR-10. OpenML is tried first by default; sklearn-native OpenML
 datasets use sklearn as fallback, and other mirrored OpenML datasets use Hugging Face as
-fallback.
+fallback. Dataset-specific defaults keep `base_min_cluster_size` matched between
+DiReEVoC and pure EVoC; moons and circles also use `base_n_clusters=2` because their
+feasible benchmark target is known.

@@ -50,6 +50,8 @@ class DatasetSpec:
     hf_max_rows: int | None = None
     sklearn_fallback: str | None = None
     default_subsample: int | None = None
+    default_base_min_cluster_size: int | None = None
+    default_base_n_clusters: int | None = None
     note: str = ""
 
 
@@ -58,24 +60,30 @@ DATASETS: dict[str, DatasetSpec] = {
         "blobs",
         "Synthetic blobs 12k",
         "synthetic_blobs",
+        default_base_min_cluster_size=100,
         note="Generated locally; useful sanity check for density-separated clusters.",
     ),
     "moons": DatasetSpec(
         "moons",
         "Synthetic moons 12k",
         "synthetic_moons",
+        default_base_min_cluster_size=100,
+        default_base_n_clusters=2,
         note="Generated locally; nonlinear two-cluster geometry.",
     ),
     "circles": DatasetSpec(
         "circles",
         "Synthetic circles 12k",
         "synthetic_circles",
+        default_base_min_cluster_size=100,
+        default_base_n_clusters=2,
         note="Generated locally; nested nonlinear cluster geometry.",
     ),
     "digits": DatasetSpec(
         "digits",
         "sklearn digits",
         "sklearn_digits",
+        default_base_min_cluster_size=10,
         note="Small 8x8 handwritten digits; CPU-friendly smoke dataset.",
     ),
     "iris": DatasetSpec(
@@ -100,6 +108,7 @@ DATASETS: dict[str, DatasetSpec] = {
         "olivetti_faces",
         "Olivetti faces",
         "sklearn_olivetti",
+        default_base_min_cluster_size=2,
         note="400 face images, 40 identities; intentionally tiny for this pipeline.",
     ),
     "mnist": DatasetSpec(
@@ -110,6 +119,7 @@ DATASETS: dict[str, DatasetSpec] = {
         hf_name="ylecun/mnist",
         hf_kind="image",
         default_subsample=30000,
+        default_base_min_cluster_size=100,
         note="OpenML mnist_784; falls back to Hugging Face ylecun/mnist.",
     ),
     "fashion_mnist": DatasetSpec(
@@ -120,6 +130,7 @@ DATASETS: dict[str, DatasetSpec] = {
         hf_name="zalando-datasets/fashion_mnist",
         hf_kind="image",
         default_subsample=30000,
+        default_base_min_cluster_size=100,
         note="OpenML Fashion-MNIST; falls back to Hugging Face zalando-datasets/fashion_mnist.",
     ),
     "dbpedia14": DatasetSpec(
@@ -127,6 +138,7 @@ DATASETS: dict[str, DatasetSpec] = {
         "DBpedia-14 BGE-small",
         "hf_dbpedia14",
         default_subsample=49000,
+        default_base_min_cluster_size=100,
         note="DBpedia ontology text embedded with BGE-small; requires datasets and sentence-transformers.",
     ),
     "cifar10": DatasetSpec(
@@ -138,6 +150,7 @@ DATASETS: dict[str, DatasetSpec] = {
         hf_kind="image",
         hf_image_column="img",
         default_subsample=1500,
+        default_base_min_cluster_size=25,
         note="Raw 32x32 RGB pixels; falls back to Hugging Face uoft-cs/cifar10.",
     ),
     "usps": DatasetSpec(
@@ -189,6 +202,7 @@ DATASETS: dict[str, DatasetSpec] = {
         hf_max_rows=50000,
         sklearn_fallback="covtype",
         default_subsample=50000,
+        default_base_min_cluster_size=100,
         note="Forest cover classification; sklearn fallback is preferred when OpenML is unavailable; HF mirror is declared.",
     ),
     "letter": DatasetSpec(
@@ -238,6 +252,7 @@ DATASETS: dict[str, DatasetSpec] = {
         "Wiki-CS",
         "pyg_wiki_cs",
         default_subsample=30000,
+        default_base_min_cluster_size=100,
         note="Optional graph-feature dataset; requires torch-geometric.",
     ),
     "facebook_page_page": DatasetSpec(
@@ -245,6 +260,7 @@ DATASETS: dict[str, DatasetSpec] = {
         "Facebook Page-Page",
         "pyg_facebook_page_page",
         default_subsample=30000,
+        default_base_min_cluster_size=100,
         note="Optional graph-feature dataset; requires torch-geometric.",
     ),
     "ogbn_arxiv": DatasetSpec(
@@ -252,6 +268,7 @@ DATASETS: dict[str, DatasetSpec] = {
         "OGBN-Arxiv",
         "ogb_arxiv",
         default_subsample=50000,
+        default_base_min_cluster_size=100,
         note="Optional graph-feature dataset; requires ogb.",
     ),
 }
@@ -607,9 +624,22 @@ def parse_dataset_selection(value: str, include_graphs: bool) -> list[str]:
 
 
 def benchmark_command(spec: DatasetSpec, npz_path: Path, output_dir: Path, args) -> list[str]:
-    with np.load(npz_path) as data:
-        n_features = int(data["X"].shape[1])
-    n_components = min(args.n_components, n_features)
+    if args.dry_run and not npz_path.exists():
+        n_components = args.n_components
+    else:
+        with np.load(npz_path) as data:
+            n_features = int(data["X"].shape[1])
+        n_components = min(args.n_components, n_features)
+    base_min_cluster_size = (
+        args.base_min_cluster_size
+        if args.base_min_cluster_size is not None
+        else spec.default_base_min_cluster_size or 5
+    )
+    base_n_clusters = (
+        args.base_n_clusters
+        if args.base_n_clusters is not None
+        else spec.default_base_n_clusters
+    )
     command = [
         sys.executable,
         "examples/benchmark_visuals.py",
@@ -626,7 +656,7 @@ def benchmark_command(spec: DatasetSpec, npz_path: Path, output_dir: Path, args)
         "--min-samples",
         str(args.min_samples),
         "--base-min-cluster-size",
-        str(args.base_min_cluster_size),
+        str(base_min_cluster_size),
         "--n-components",
         str(n_components),
         "--n-neighbors",
@@ -640,6 +670,8 @@ def benchmark_command(spec: DatasetSpec, npz_path: Path, output_dir: Path, args)
         "--selector",
         args.selector,
     ]
+    if base_n_clusters is not None:
+        command.extend(["--base-n-clusters", str(base_n_clusters)])
     subsample = None if args.full else (args.subsample or spec.default_subsample)
     if subsample is not None:
         command.extend(["--subsample", str(subsample)])
@@ -676,6 +708,9 @@ def metrics_row(slug: str, metrics: dict) -> dict:
         "n_train": metrics["data"]["n_train"],
         "n_features": metrics["data"]["n_features"],
         "n_classes": metrics["data"]["n_classes"],
+        "min_samples": metrics["data"].get("min_samples"),
+        "base_min_cluster_size": metrics["data"].get("base_min_cluster_size"),
+        "base_n_clusters": metrics["data"].get("base_n_clusters"),
         "dire_auto_ari": dire["auto_ari"],
         "pure_auto_ari": pure["auto_ari"],
         "auto_delta": dire["auto_ari"] - pure["auto_ari"],
@@ -792,7 +827,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--test-fraction", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--min-samples", type=int, default=10)
-    parser.add_argument("--base-min-cluster-size", type=int, default=10)
+    parser.add_argument("--base-min-cluster-size", type=int, default=None)
+    parser.add_argument(
+        "--base-n-clusters",
+        type=int,
+        default=None,
+        help="force a base-layer target cluster count for every dataset; by default only dataset-specific controls use this",
+    )
     parser.add_argument("--n-components", type=int, default=8)
     parser.add_argument("--n-neighbors", type=int, default=15)
     parser.add_argument("--predict-neighbors", type=int, default=15)

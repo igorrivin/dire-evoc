@@ -72,9 +72,10 @@ labels, membership = knn_vote_predict(query, reference, train_labels, n_neighbor
 
 The strongest use case is medium-to-large embedding data where density-separated
 structure is present and the DiRe layout is a better clustering substrate than the raw
-vectors. The table below is from the checked CUDA Docker repro on an NVIDIA A10; see
-`docs/benchmarks.md` and the committed
-`artifacts/cuda-broad-163-192-33-223-fragment-merge2/` artifact tree.
+vectors. The table below is from the checked CUDA Docker repro on an NVIDIA A10, using
+the same dataset-specific EVoC `base_min_cluster_size` and `base_n_clusters` controls
+for DiReEVoC and pure EVoC; see `docs/benchmarks.md` and the local
+`artifacts/cuda-bmc-tuned/` artifact tree.
 
 ![CUDA auto ARI comparison](docs/_static/benchmark_auto_ari.svg)
 
@@ -84,37 +85,37 @@ vectors. The table below is from the checked CUDA Docker repro on an NVIDIA A10;
 
 | Dataset | DiReEVoC auto ARI | Pure EVoC auto ARI | Notes |
 | --- | ---: | ---: | --- |
-| Synthetic blobs 12k | 1.000 | 1.000 | Adaptive smoothing recovers the perfect layer |
-| Synthetic moons 12k | 0.524 | 0.350 | Graph fragment merge fixes the split-layer failure; fixed-k ties |
-| Synthetic circles 12k | 0.279 | 0.037 | Graph fragment merge improves the selected layer; fixed-k ties |
-| MNIST | 0.656 | 0.813 | Pure EVoC wins in this 24k HF-backed run |
-| sklearn digits | 0.261 | 0.282 | Small image data; fixed-k favors Pure EVoC |
-| sklearn iris | 0.588 | 0.236 | DiReEVoC auto win; fixed-k is close |
-| sklearn wine | 0.000 | 0.121 | Pure EVoC auto win; fixed-k favors DiReEVoC |
-| sklearn breast cancer | 0.630 | 0.116 | DiReEVoC win; graph fragment merge recovers the binary split |
+| Synthetic blobs 12k | 1.000 | 1.000 | Matched `base_min_cluster_size=100` |
+| Synthetic moons 12k | 1.000 | 1.000 | Matched `base_min_cluster_size=100`, `base_n_clusters=2` |
+| Synthetic circles 12k | 1.000 | 1.000 | Matched `base_min_cluster_size=100`, `base_n_clusters=2` |
+| MNIST | 0.723 | 0.813 | Pure EVoC wins in this 24k HF-backed run |
+| sklearn digits | 0.294 | 0.305 | Small image data; fixed-k favors Pure EVoC |
+| sklearn iris | 0.562 | 0.236 | DiReEVoC auto win; fixed-k is close |
+| sklearn wine | 0.277 | 0.121 | DiReEVoC auto win in this tuned run |
+| sklearn breast cancer | 0.404 | 0.116 | DiReEVoC win; fixed-k is stronger |
 | Fashion-MNIST | 0.440 | 0.390 | DiReEVoC win; stronger at fixed-k |
-| DBpedia-14 BGE-small | 0.608 | 0.623 | Pure EVoC slightly wins in this 39.2k run |
-| Olivetti faces | 0.050 | 0.063 | Tiny data; both poor |
-| Forest CoverType | 0.016 | -0.006 | DiReEVoC slight win; both poor |
+| DBpedia-14 BGE-small | 0.607 | 0.623 | Pure EVoC slightly wins in this 39.2k run |
+| Olivetti faces | 0.028 | 0.063 | Tiny data; both poor |
+| Forest CoverType | 0.016 | -0.026 | DiReEVoC slight win; both poor |
 | CIFAR-10 | 0.030 | 0.023 | Small raw-pixel stress test; both poor |
 
-Runtime from the same committed CUDA run:
+Runtime from the same CUDA run:
 
 | Dataset | DiReEVoC fit | Pure EVoC fit |
 | --- | ---: | ---: |
-| Synthetic blobs 12k | 18.36s | 11.79s |
-| Synthetic moons 12k | 11.71s | 18.22s |
-| Synthetic circles 12k | 8.42s | 0.28s |
-| MNIST | 26.85s | 0.84s |
-| sklearn digits | 10.06s | 0.19s |
-| sklearn iris | 6.74s | 11.65s |
-| sklearn wine | 8.78s | 0.16s |
-| sklearn breast cancer | 7.09s | 0.18s |
-| Fashion-MNIST | 28.04s | 0.77s |
-| DBpedia-14 BGE-small | 37.42s | 0.77s |
-| Olivetti faces | 7.44s | 0.34s |
-| Forest CoverType | 25.35s | 0.62s |
-| CIFAR-10 | 9.85s | 0.42s |
+| Synthetic blobs 12k | 10.33s | 11.70s |
+| Synthetic moons 12k | 5.68s | 0.27s |
+| Synthetic circles 12k | 5.66s | 0.26s |
+| MNIST | 27.92s | 0.74s |
+| sklearn digits | 9.91s | 0.19s |
+| sklearn iris | 6.63s | 0.23s |
+| sklearn wine | 7.31s | 0.16s |
+| sklearn breast cancer | 7.53s | 0.17s |
+| Fashion-MNIST | 27.54s | 0.76s |
+| DBpedia-14 BGE-small | 23.76s | 0.76s |
+| Olivetti faces | 7.38s | 0.28s |
+| Forest CoverType | 23.49s | 0.59s |
+| CIFAR-10 | 10.33s | 0.41s |
 
 ![CUDA fit runtime ratio](docs/_static/benchmark_fit_ratio.svg)
 
@@ -122,10 +123,10 @@ The honest boundary:
 
 - This is not a universal clustering-quality win.
 - DiRe is data-hungry; tiny datasets are a poor fit.
-- Layer selection is still a real failure mode. The graph fragment merge fixes the
-  obvious moons/circles over-fragmentation, but MNIST, digits, Fashion-MNIST, DBpedia,
-  Olivetti, and CoverType correctly reject collapses to one cluster and keep their
-  selected layers.
+- Layer selection is still a real failure mode. The tuned run makes moons/circles
+  feasible by setting the known two-cluster base layer for both methods, but MNIST,
+  digits, Fashion-MNIST, DBpedia, Olivetti, and CoverType still expose selector and
+  substrate limits.
 - A hard partition is often the wrong object on continuous manifolds. In that case,
   inspect the layout and intrinsic dimension before trusting cluster labels.
 - The GPU Phase-2 speedup is regime-dependent. It helps at large `n` and low CPU core

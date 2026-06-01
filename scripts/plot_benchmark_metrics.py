@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Generate benchmark comparison figures for the README and Sphinx docs.
 
-By default this reads ``artifacts/cuda/*/metrics.json`` if present. If that conventional
-path does not exist, it falls back to the latest committed A10 Docker artifact tree. The
-embedded fallback data mirrors that same run so documentation can be rebuilt without
-shipping the large artifact directory.
+By default this reads the tuned CUDA artifact tree if present, then the conventional
+``artifacts/cuda/*/metrics.json`` path. The embedded fallback data mirrors that tuned
+A10 run so documentation can be rebuilt without shipping the large artifact directory.
 """
 
 from __future__ import annotations
@@ -22,22 +21,23 @@ OUT = ROOT / "docs" / "_static"
 
 
 FALLBACK = [
-    {"dataset": "Synthetic blobs 12k", "n": 9600, "d": 32, "classes": 8, "dire_auto": 1.0, "evoc_auto": 1.0, "dire_fixed": 1.0, "evoc_fixed": 1.0, "dire_fit": 18.3555, "evoc_fit": 11.7895},
-    {"dataset": "Synthetic moons 12k", "n": 9600, "d": 8, "classes": 2, "dire_auto": 0.5241, "evoc_auto": 0.3500, "dire_fixed": 1.0, "evoc_fixed": 1.0, "dire_fit": 11.7054, "evoc_fit": 18.2202},
-    {"dataset": "Synthetic circles 12k", "n": 9600, "d": 8, "classes": 2, "dire_auto": 0.2787, "evoc_auto": 0.0374, "dire_fixed": 1.0, "evoc_fixed": 1.0, "dire_fit": 8.4180, "evoc_fit": 0.2769},
-    {"dataset": "MNIST", "n": 24000, "d": 784, "classes": 10, "dire_auto": 0.6558, "evoc_auto": 0.8128, "dire_fixed": 0.7715, "evoc_fixed": 0.8476, "dire_fit": 26.8498, "evoc_fit": 0.8366},
-    {"dataset": "sklearn digits", "n": 1438, "d": 64, "classes": 10, "dire_auto": 0.2613, "evoc_auto": 0.2823, "dire_fixed": 0.8047, "evoc_fixed": 0.8725, "dire_fit": 10.0573, "evoc_fit": 0.1875},
-    {"dataset": "sklearn iris", "n": 120, "d": 4, "classes": 3, "dire_auto": 0.5881, "evoc_auto": 0.2358, "dire_fixed": 0.5616, "evoc_fixed": 0.5817, "dire_fit": 6.7423, "evoc_fit": 11.6486},
-    {"dataset": "sklearn wine", "n": 142, "d": 13, "classes": 3, "dire_auto": 0.0, "evoc_auto": 0.1215, "dire_fixed": 0.4111, "evoc_fixed": 0.2570, "dire_fit": 8.7760, "evoc_fit": 0.1581},
-    {"dataset": "sklearn breast cancer", "n": 455, "d": 30, "classes": 2, "dire_auto": 0.6301, "evoc_auto": 0.1160, "dire_fixed": 0.6691, "evoc_fixed": 0.5108, "dire_fit": 7.0861, "evoc_fit": 0.1760},
-    {"dataset": "Fashion-MNIST", "n": 24000, "d": 784, "classes": 10, "dire_auto": 0.4396, "evoc_auto": 0.3903, "dire_fixed": 0.3985, "evoc_fixed": 0.2729, "dire_fit": 28.0445, "evoc_fit": 0.7667},
-    {"dataset": "DBpedia-14 BGE-small", "n": 39200, "d": 384, "classes": 14, "dire_auto": 0.6082, "evoc_auto": 0.6228, "dire_fixed": 0.5602, "evoc_fixed": 0.6252, "dire_fit": 37.4232, "evoc_fit": 0.7697},
-    {"dataset": "Olivetti faces", "n": 320, "d": 4096, "classes": 40, "dire_auto": 0.0498, "evoc_auto": 0.0634, "dire_fixed": 0.0142, "evoc_fixed": 0.0564, "dire_fit": 7.4366, "evoc_fit": 0.3362},
-    {"dataset": "Forest CoverType", "n": 40000, "d": 54, "classes": 7, "dire_auto": 0.0160, "evoc_auto": -0.0062, "dire_fixed": 0.0061, "evoc_fixed": -0.0327, "dire_fit": 25.3535, "evoc_fit": 0.6235},
-    {"dataset": "CIFAR-10", "n": 1200, "d": 3072, "classes": 10, "dire_auto": 0.0296, "evoc_auto": 0.0232, "dire_fixed": 0.0101, "evoc_fixed": 0.0080, "dire_fit": 9.8526, "evoc_fit": 0.4242},
+    {"dataset": "Synthetic blobs 12k", "n": 9600, "d": 32, "classes": 8, "dire_auto": 1.0, "evoc_auto": 1.0, "dire_fixed": 1.0, "evoc_fixed": 1.0, "dire_fit": 10.3323, "evoc_fit": 11.7014},
+    {"dataset": "Synthetic moons 12k", "n": 9600, "d": 8, "classes": 2, "dire_auto": 1.0, "evoc_auto": 1.0, "dire_fixed": 1.0, "evoc_fixed": 1.0, "dire_fit": 5.6835, "evoc_fit": 0.2690},
+    {"dataset": "Synthetic circles 12k", "n": 9600, "d": 8, "classes": 2, "dire_auto": 1.0, "evoc_auto": 1.0, "dire_fixed": 1.0, "evoc_fixed": 1.0, "dire_fit": 5.6593, "evoc_fit": 0.2594},
+    {"dataset": "MNIST", "n": 24000, "d": 784, "classes": 10, "dire_auto": 0.7225, "evoc_auto": 0.8128, "dire_fixed": 0.7730, "evoc_fixed": 0.8476, "dire_fit": 27.9191, "evoc_fit": 0.7386},
+    {"dataset": "sklearn digits", "n": 1438, "d": 64, "classes": 10, "dire_auto": 0.2938, "evoc_auto": 0.3054, "dire_fixed": 0.8030, "evoc_fixed": 0.8725, "dire_fit": 9.9067, "evoc_fit": 0.1929},
+    {"dataset": "sklearn iris", "n": 120, "d": 4, "classes": 3, "dire_auto": 0.5616, "evoc_auto": 0.2358, "dire_fixed": 0.5616, "evoc_fixed": 0.5817, "dire_fit": 6.6348, "evoc_fit": 0.2283},
+    {"dataset": "sklearn wine", "n": 142, "d": 13, "classes": 3, "dire_auto": 0.2765, "evoc_auto": 0.1215, "dire_fixed": 0.4124, "evoc_fixed": 0.2570, "dire_fit": 7.3069, "evoc_fit": 0.1579},
+    {"dataset": "sklearn breast cancer", "n": 455, "d": 30, "classes": 2, "dire_auto": 0.4038, "evoc_auto": 0.1160, "dire_fixed": 0.6691, "evoc_fixed": 0.5108, "dire_fit": 7.5310, "evoc_fit": 0.1720},
+    {"dataset": "Fashion-MNIST", "n": 24000, "d": 784, "classes": 10, "dire_auto": 0.4397, "evoc_auto": 0.3903, "dire_fixed": 0.3983, "evoc_fixed": 0.2729, "dire_fit": 27.5410, "evoc_fit": 0.7639},
+    {"dataset": "DBpedia-14 BGE-small", "n": 39200, "d": 384, "classes": 14, "dire_auto": 0.6067, "evoc_auto": 0.6228, "dire_fixed": 0.5592, "evoc_fixed": 0.6252, "dire_fit": 23.7640, "evoc_fit": 0.7596},
+    {"dataset": "Olivetti faces", "n": 320, "d": 4096, "classes": 40, "dire_auto": 0.0275, "evoc_auto": 0.0634, "dire_fixed": 0.0056, "evoc_fixed": 0.0564, "dire_fit": 7.3803, "evoc_fit": 0.2827},
+    {"dataset": "Forest CoverType", "n": 40000, "d": 54, "classes": 7, "dire_auto": 0.0158, "evoc_auto": -0.0256, "dire_fixed": 0.0064, "evoc_fixed": -0.0327, "dire_fit": 23.4873, "evoc_fit": 0.5902},
+    {"dataset": "CIFAR-10", "n": 1200, "d": 3072, "classes": 10, "dire_auto": 0.0299, "evoc_auto": 0.0232, "dire_fixed": 0.0039, "evoc_fixed": 0.0080, "dire_fit": 10.3288, "evoc_fit": 0.4058},
 ]
 
 DEFAULT_INPUT_DIRS = (
+    ROOT / "artifacts" / "cuda-bmc-tuned",
     ROOT / "artifacts" / "cuda",
     ROOT / "artifacts" / "cuda-broad-163-192-33-223-fragment-merge2",
 )
