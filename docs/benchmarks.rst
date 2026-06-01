@@ -90,6 +90,63 @@ The fixed-k substrate comparison removes layer-selection and peak-granularity ef
 .. image:: _static/benchmark_fixed_k_ari.svg
    :alt: Fixed-k ARI benchmark comparison for DiReEVoC and pure EVoC
 
+Runtime summary
+---------------
+
+The same committed CUDA run records fit timings for every dataset:
+
+.. image:: _static/benchmark_fit_seconds.svg
+   :alt: Fit runtime comparison for DiReEVoC and pure EVoC
+
+.. image:: _static/benchmark_fit_ratio.svg
+   :alt: Fit runtime ratio, DiReEVoC divided by pure EVoC
+
+.. list-table::
+   :header-rows: 1
+
+   * - Dataset
+     - DiReEVoC fit
+     - Pure EVoC fit
+   * - Synthetic blobs 12k
+     - 18.36s
+     - 11.79s
+   * - Synthetic moons 12k
+     - 11.71s
+     - 18.22s
+   * - Synthetic circles 12k
+     - 8.42s
+     - 0.28s
+   * - MNIST
+     - 26.85s
+     - 0.84s
+   * - sklearn digits
+     - 10.06s
+     - 0.19s
+   * - sklearn iris
+     - 6.74s
+     - 11.65s
+   * - sklearn wine
+     - 8.78s
+     - 0.16s
+   * - sklearn breast cancer
+     - 7.09s
+     - 0.18s
+   * - Fashion-MNIST
+     - 28.04s
+     - 0.77s
+   * - DBpedia-14 BGE-small
+     - 37.42s
+     - 0.77s
+   * - Olivetti faces
+     - 7.44s
+     - 0.34s
+   * - Forest CoverType
+     - 25.35s
+     - 0.62s
+   * - CIFAR-10
+     - 9.85s
+     - 0.42s
+
 Comparative metrics
 -------------------
 
