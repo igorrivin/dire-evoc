@@ -59,6 +59,13 @@ class DiReEVoC:
         "silhouette" selector.
     noise_gate : float, default=0.5
         Noise fraction above which the adaptive ``min_samples`` search is triggered.
+    merge_fragments : bool, default=False
+        If True, post-process the selected layer by unioning clusters that share strong
+        reciprocal kNN evidence in DiRe's ORIGINAL-space graph (the signature of adjacent
+        pieces of one continuous component). This is a heuristic with hand-tuned thresholds
+        (``fragment_merge_*``) and a loose acceptance guard; it is **off by default pending
+        review** and only active for the "silhouette" selector. Validated to no-op on
+        well-separated data, but it can change clusterings on other inputs.
     n_neighbors_predict : int or None
         Neighbours for the out-of-sample vote; defaults to the DiRe ``n_neighbors``.
     random_state : int or None
@@ -84,7 +91,7 @@ class DiReEVoC:
                  base_min_cluster_size=5, base_n_clusters=None,
                  use_gpu="auto", selector="silhouette",
                  adaptive_min_samples=True, noise_gate=0.5,
-                 merge_fragments=True, fragment_merge_min_edges=3,
+                 merge_fragments=False, fragment_merge_min_edges=3,
                  fragment_merge_edge_fraction=0.01,
                  fragment_merge_min_score_ratio=0.25,
                  gpu_cluster_min_samples=1000,
