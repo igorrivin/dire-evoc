@@ -98,6 +98,54 @@ def timed(fn):
     return value, time.perf_counter() - t0
 
 
+def summarize_seconds(samples):
+    arr = np.asarray(samples, dtype=np.float64)
+    if arr.size == 0:
+        raise ValueError("cannot summarize an empty timing sample")
+    warm = arr[1:] if arr.size > 1 else arr
+    return {
+        "repeats": int(arr.size),
+        "warm_repeats": int(warm.size),
+        "samples": [float(value) for value in arr],
+        "first": float(arr[0]),
+        "last": float(arr[-1]),
+        "mean_all": float(np.mean(arr)),
+        "median_all": float(np.median(arr)),
+        "std_all": float(np.std(arr)),
+        "mean_warm": float(np.mean(warm)),
+        "median_warm": float(np.median(warm)),
+        "std_warm": float(np.std(warm)),
+        "min_all": float(np.min(arr)),
+        "max_all": float(np.max(arr)),
+    }
+
+
+def timed_repeated(fn, repeats):
+    first_value = None
+    samples = []
+    for repeat in range(max(1, int(repeats))):
+        value, seconds = timed(fn)
+        if repeat == 0:
+            first_value = value
+        samples.append(seconds)
+    return first_value, summarize_seconds(samples)
+
+
+def summarize_timing_dicts(timing_dicts):
+    keys = sorted(
+        {
+            key
+            for timings in timing_dicts
+            for key, value in timings.items()
+            if isinstance(value, (float, int, np.floating, np.integer))
+        }
+    )
+    return {
+        key: summarize_seconds([float(timings.get(key, 0.0)) for timings in timing_dicts])
+        for key in keys
+    }
+
+
 def cluster_count(labels):
     labels = np.asarray(labels)
     return int(np.unique(labels[labels >= 0]).size)
@@ -147,21 +195,29 @@ def fit_vanilla_evoc(X, y, args):
     """
     from evoc import EVoC
 
-    ev, fit_seconds = timed(
+    ev, fit_stats = timed_repeated(
         lambda: EVoC(
             min_samples=args.min_samples,
             base_min_cluster_size=args.base_min_cluster_size,
             base_n_clusters=args.base_n_clusters,
             random_state=args.seed,
-        ).fit(X)
+        ).fit(X),
+        args.timing_repeats,
     )
     result = evaluate_auto_oracle(ev.labels_, ev.cluster_layers_, y)
-    result["fit_seconds"] = fit_seconds
-    result["total_seconds"] = fit_seconds
+    result["fit_seconds"] = fit_stats["mean_all"]
+    result["total_seconds"] = fit_stats["mean_all"]
+    result["fit_seconds_first"] = fit_stats["first"]
+    result["fit_seconds_warm_mean"] = fit_stats["mean_warm"]
+    result["total_seconds_first"] = fit_stats["first"]
+    result["total_seconds_warm_mean"] = fit_stats["mean_warm"]
+    result["timing_repeats"] = fit_stats["repeats"]
+    result["timing_policy"] = "mean_all_first_included"
+    result["timing_stats"] = {"fit_seconds": fit_stats, "total_seconds": fit_stats}
     return ev, result
 
 
-def fit_dire_evoc_profile(X_train, y_train, X_test, y_test, args):
+def _fit_dire_evoc_profile_once(X_train, y_train, X_test, y_test, args):
     from dire_evoc import DiReEVoC
     from dire_evoc.dimension import intrinsic_dimension_from_dire
     from dire_evoc.predict import knn_vote_predict, prepare_reference
@@ -296,26 +352,92 @@ def fit_dire_evoc_profile(X_train, y_train, X_test, y_test, args):
     return layout, result
 
 
+def fit_dire_evoc_profile(X_train, y_train, X_test, y_test, args):
+    repeats = max(1, int(args.timing_repeats))
+    first_layout = None
+    first_result = None
+    repeated_results = []
+
+    for repeat in range(repeats):
+        layout, result = _fit_dire_evoc_profile_once(
+            X_train,
+            y_train,
+            X_test,
+            y_test,
+            args,
+        )
+        if repeat == 0:
+            first_layout = layout
+            first_result = result
+        repeated_results.append(result)
+
+    if repeats == 1:
+        first_result["timing_repeats"] = 1
+        first_result["timing_policy"] = "single_run"
+        first_result["fit_seconds_first"] = first_result["fit_seconds"]
+        first_result["fit_seconds_warm_mean"] = first_result["fit_seconds"]
+        first_result["total_seconds_first"] = first_result["total_seconds"]
+        first_result["total_seconds_warm_mean"] = first_result["total_seconds"]
+        first_result["timing_stats"] = {
+            "fit_seconds": summarize_seconds([first_result["fit_seconds"]]),
+            "total_seconds": summarize_seconds([first_result["total_seconds"]]),
+            "phases": summarize_timing_dicts([first_result["timings"]]),
+        }
+        return first_layout, first_result
+
+    fit_stats = summarize_seconds([result["fit_seconds"] for result in repeated_results])
+    total_stats = summarize_seconds(
+        [result["total_seconds"] for result in repeated_results]
+    )
+    phase_stats = summarize_timing_dicts(
+        [result["timings"] for result in repeated_results]
+    )
+    first_result["timings_first"] = first_result["timings"]
+    first_result["timings"] = {
+        key: value["mean_all"] for key, value in phase_stats.items()
+    }
+    for key, value in first_result["timings_first"].items():
+        if not isinstance(value, (float, int, np.floating, np.integer)):
+            first_result["timings"][key] = value
+
+    first_result["fit_seconds"] = fit_stats["mean_all"]
+    first_result["total_seconds"] = total_stats["mean_all"]
+    first_result["fit_seconds_first"] = fit_stats["first"]
+    first_result["fit_seconds_warm_mean"] = fit_stats["mean_warm"]
+    first_result["total_seconds_first"] = total_stats["first"]
+    first_result["total_seconds_warm_mean"] = total_stats["mean_warm"]
+    first_result["timing_repeats"] = repeats
+    first_result["timing_policy"] = "mean_all_first_included"
+    first_result["timing_stats"] = {
+        "fit_seconds": fit_stats,
+        "total_seconds": total_stats,
+        "phases": phase_stats,
+    }
+    return first_layout, first_result
+
+
 def compute_fixed_k(X_train, y_train, layout, n_classes, args):
     from evoc import EVoC
     from evoc.clustering import build_cluster_layers
 
-    ev_fixed, ev_seconds = timed(
+    ev_fixed, ev_stats = timed_repeated(
         lambda: EVoC(
             min_samples=args.min_samples,
             base_n_clusters=n_classes,
             random_state=args.seed,
         )
         .fit(X_train)
-        .cluster_layers_[0]
+        .cluster_layers_[0],
+        args.timing_repeats,
     )
-    de_fixed, de_seconds = timed(
+    de_fixed, de_stats = timed_repeated(
         lambda: build_cluster_layers(
             layout,
             min_samples=args.min_samples,
             base_min_cluster_size=args.base_min_cluster_size,
             base_n_clusters=n_classes,
-        )[0][0]
+        )[0][0],
+        args.timing_repeats,
     )
     return {
         "vanilla_evoc": {
@@ -323,14 +445,20 @@ def compute_fixed_k(X_train, y_train, layout, n_classes, args):
             "fixed_k_nmi": float(normalized_mutual_info_score(y_train, ev_fixed)),
             "fixed_k_clusters": cluster_count(ev_fixed),
             "fixed_k_noise_fraction": noise_fraction(ev_fixed),
-            "fixed_k_seconds": ev_seconds,
+            "fixed_k_seconds": ev_stats["mean_all"],
+            "fixed_k_seconds_first": ev_stats["first"],
+            "fixed_k_seconds_warm_mean": ev_stats["mean_warm"],
+            "fixed_k_timing_stats": ev_stats,
         },
         "dire_evoc": {
             "fixed_k_ari": float(adjusted_rand_score(y_train, de_fixed)),
             "fixed_k_nmi": float(normalized_mutual_info_score(y_train, de_fixed)),
             "fixed_k_clusters": cluster_count(de_fixed),
             "fixed_k_noise_fraction": noise_fraction(de_fixed),
-            "fixed_k_seconds": de_seconds,
+            "fixed_k_seconds": de_stats["mean_all"],
+            "fixed_k_seconds_first": de_stats["first"],
+            "fixed_k_seconds_warm_mean": de_stats["mean_warm"],
+            "fixed_k_timing_stats": de_stats,
         },
     }
 
@@ -550,6 +678,15 @@ def parse_args():
     p.add_argument("--n-neighbors", type=int, default=15)
     p.add_argument("--predict-neighbors", type=int, default=15)
     p.add_argument("--max-iter-layout", type=int, default=100)
+    p.add_argument(
+        "--timing-repeats",
+        type=int,
+        default=1,
+        help=(
+            "repeat timed fits this many times; metrics report mean_all with the first "
+            "run included plus first-run and warm-only summaries"
+        ),
+    )
     p.add_argument("--use-gpu", default="auto", choices=["auto", "true", "false"])
     p.add_argument(
         "--selector",
@@ -588,6 +725,7 @@ def main():
         X, y, args.test_fraction, args.seed
     )
     n_classes = int(np.unique(y_train).size)
+    args.timing_repeats = max(1, int(args.timing_repeats))
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -620,6 +758,8 @@ def main():
             "base_n_clusters": None
             if args.base_n_clusters is None
             else int(args.base_n_clusters),
+            "timing_repeats": int(args.timing_repeats),
+            "timing_policy": "mean_all_first_included",
         },
         "vanilla_evoc": vanilla,
         "dire_evoc": dire,

@@ -95,14 +95,18 @@ labels, membership = knn_vote_predict(prepare_reference(X_new), ref, train_label
 
 ```bash
 python examples/benchmark_dataset_suite.py --list-datasets
+python examples/benchmark_dataset_suite.py --datasets smoke \
+  --output-dir artifacts/smoke-suite --timing-repeats 20
 python examples/benchmark_dataset_suite.py --datasets default \
-  --output-dir artifacts/dataset-suite --test-fraction 0.2
+  --output-dir artifacts/dataset-suite --test-fraction 0.2 --timing-repeats 20
 ```
 
-The default suite compares DiReEVoC against pure EVoC on synthetic blobs, moons, circles,
-sklearn digits/iris/wine/breast-cancer/Olivetti, MNIST, Fashion-MNIST, DBpedia-14,
-Forest CoverType, and CIFAR-10. OpenML is tried first by default; sklearn-native OpenML
-datasets use sklearn as fallback, and other mirrored OpenML datasets use Hugging Face as
-fallback. Dataset-specific defaults keep `base_min_cluster_size` matched between
-DiReEVoC and pure EVoC; moons and circles also use `base_n_clusters=2` because their
-feasible benchmark target is known.
+The `smoke` preset runs only synthetic blobs, moons, and circles. The default suite keeps
+those same synthetic cases and adds sklearn digits/iris/wine/breast-cancer/Olivetti,
+MNIST, Fashion-MNIST, DBpedia-14, Forest CoverType, and CIFAR-10. CIFAR-10 is pooled to
+16x16 RGB features for the benchmark so it stays on the DiRe cuVS kNN path. OpenML is
+tried first by default; sklearn-native OpenML datasets use sklearn as fallback, and other
+mirrored OpenML datasets use Hugging Face as fallback. Dataset-specific defaults keep
+`base_min_cluster_size` matched between DiReEVoC and pure EVoC; moons and circles also
+use `base_n_clusters=2` because their feasible benchmark target is known. Repeated
+timings include the first run in `fit_seconds` and also write warm-only means.

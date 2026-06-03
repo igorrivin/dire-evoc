@@ -64,6 +64,8 @@ def dataset_suite_command(args: argparse.Namespace, output_dir: Path) -> list[st
         str(args.predict_neighbors),
         "--max-iter-layout",
         str(args.max_iter_layout),
+        "--timing-repeats",
+        str(args.timing_repeats),
         "--use-gpu",
         args.use_gpu,
         "--selector",
@@ -98,7 +100,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--datasets",
         default="default",
-        help="dataset suite selection: default, all, graphs, or comma-separated slugs",
+        help="dataset suite selection: smoke, default, all, graphs, or comma-separated slugs",
     )
     parser.add_argument("--include-graphs", action="store_true")
     parser.add_argument("--continue-on-error", action="store_true")
@@ -121,6 +123,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-neighbors", type=int, default=15)
     parser.add_argument("--predict-neighbors", type=int, default=15)
     parser.add_argument("--max-iter-layout", type=int, default=100)
+    parser.add_argument(
+        "--timing-repeats",
+        type=int,
+        default=1,
+        help=(
+            "repeat each timed benchmark this many times; metrics keep first-included "
+            "and warm-only summaries"
+        ),
+    )
     parser.add_argument("--use-gpu", default="auto", choices=["auto", "true", "false"])
     parser.add_argument(
         "--selector",
@@ -133,6 +144,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    args.timing_repeats = max(1, int(args.timing_repeats))
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -141,6 +153,8 @@ def main() -> int:
         "datasets": args.datasets,
         "include_graphs": args.include_graphs,
         "prefer_hf": args.prefer_hf,
+        "timing_repeats": int(args.timing_repeats),
+        "timing_policy": "mean_all_first_included",
         "runs": [],
     }
 
@@ -168,6 +182,7 @@ def main() -> int:
         str(output_dir / "suite_auto_ari.svg"),
         str(output_dir / "suite_auto_delta.svg"),
         str(output_dir / "suite_fit_seconds.svg"),
+        str(output_dir / "suite_fit_seconds_warm.svg"),
     ]
     (output_dir / "cuda_repro_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(json.dumps(manifest, indent=2))

@@ -8,6 +8,9 @@ for each dataset, and writes suite-level CSV/SVG summaries.
 Examples:
     python examples/benchmark_dataset_suite.py --list-datasets
 
+    python examples/benchmark_dataset_suite.py --datasets smoke \
+        --output-dir artifacts/smoke-suite --test-fraction 0.0
+
     python examples/benchmark_dataset_suite.py --datasets default \
         --output-dir artifacts/openml-suite --test-fraction 0.2
 
@@ -48,6 +51,7 @@ class DatasetSpec:
     hf_image_column: str = "image"
     hf_label_column: str = "label"
     hf_max_rows: int | None = None
+    hf_image_pool: int = 1
     sklearn_fallback: str | None = None
     default_subsample: int | None = None
     default_base_min_cluster_size: int | None = None
@@ -149,9 +153,13 @@ DATASETS: dict[str, DatasetSpec] = {
         hf_name="uoft-cs/cifar10",
         hf_kind="image",
         hf_image_column="img",
-        default_subsample=1500,
-        default_base_min_cluster_size=25,
-        note="Raw 32x32 RGB pixels; falls back to Hugging Face uoft-cs/cifar10.",
+        hf_image_pool=2,
+        default_subsample=30000,
+        default_base_min_cluster_size=100,
+        note=(
+            "32x32 RGB pixels average-pooled to 16x16 RGB for the benchmark; "
+            "falls back to Hugging Face uoft-cs/cifar10."
+        ),
     ),
     "usps": DatasetSpec(
         "usps",
@@ -274,10 +282,13 @@ DATASETS: dict[str, DatasetSpec] = {
 }
 
 
-DEFAULT_DATASETS = (
+SMOKE_DATASETS = (
     "blobs",
     "moons",
     "circles",
+)
+DEFAULT_DATASETS = (
+    *SMOKE_DATASETS,
     "mnist",
     "digits",
     "iris",
@@ -403,6 +414,26 @@ def maybe_limit_hf_rows(dataset, max_rows: int | None):
     return dataset.select(range(max_rows))
 
 
+def image_to_features(image, pool: int = 1) -> np.ndarray:
+    array = np.asarray(image, dtype=np.float32)
+    if pool > 1:
+        if array.ndim == 2:
+            h, w = array.shape
+            h -= h % pool
+            w -= w % pool
+            array = array[:h, :w].reshape(h // pool, pool, w // pool, pool).mean(axis=(1, 3))
+        elif array.ndim == 3:
+            h, w, c = array.shape
+            h -= h % pool
+            w -= w % pool
+            array = (
+                array[:h, :w, :]
+                .reshape(h // pool, pool, w // pool, pool, c)
+                .mean(axis=(1, 3))
+            )
+    return array.reshape(-1)
+
+
 def fetch_hf_image_npz(spec: DatasetSpec, path: Path) -> None:
     from datasets import load_dataset
 
@@ -410,9 +441,7 @@ def fetch_hf_image_npz(spec: DatasetSpec, path: Path) -> None:
     dataset = maybe_limit_hf_rows(dataset, spec.hf_max_rows)
     images = dataset[spec.hf_image_column]
     labels = dataset[spec.hf_label_column]
-    X = np.stack(
-        [np.asarray(image, dtype=np.float32).reshape(-1) for image in images]
-    )
+    X = np.stack([image_to_features(image, spec.hf_image_pool) for image in images])
     save_npz(path, X, np.asarray(labels))
 
 
@@ -605,7 +634,9 @@ def materialize_dataset(
 
 
 def parse_dataset_selection(value: str, include_graphs: bool) -> list[str]:
-    if value == "default":
+    if value == "smoke":
+        slugs = list(SMOKE_DATASETS)
+    elif value == "default":
         slugs = list(DEFAULT_DATASETS)
     elif value == "all":
         slugs = [slug for slug in DATASETS if slug not in GRAPH_DATASETS]
@@ -665,6 +696,8 @@ def benchmark_command(spec: DatasetSpec, npz_path: Path, output_dir: Path, args)
         str(args.predict_neighbors),
         "--max-iter-layout",
         str(args.max_iter_layout),
+        "--timing-repeats",
+        str(args.timing_repeats),
         "--use-gpu",
         args.use_gpu,
         "--selector",
@@ -720,6 +753,11 @@ def metrics_row(slug: str, metrics: dict) -> dict:
         "pure_fixed_k_ari": pure.get("fixed_k_ari"),
         "dire_fit_seconds": dire["fit_seconds"],
         "pure_fit_seconds": pure["fit_seconds"],
+        "dire_fit_seconds_first": dire.get("fit_seconds_first"),
+        "pure_fit_seconds_first": pure.get("fit_seconds_first"),
+        "dire_fit_seconds_warm_mean": dire.get("fit_seconds_warm_mean"),
+        "pure_fit_seconds_warm_mean": pure.get("fit_seconds_warm_mean"),
+        "timing_repeats": metrics["data"].get("timing_repeats", 1),
         "output_dir": slug,
     }
 
@@ -777,7 +815,7 @@ def plot_suite_summary(rows: list[dict], output_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(fig_width, 5.0))
     ax.bar(x - width / 2, [row["dire_fit_seconds"] for row in rows], width, label="DiReEVoC")
     ax.bar(x + width / 2, [row["pure_fit_seconds"] for row in rows], width, label="Pure EVoC")
-    ax.set_title("Fit time by dataset")
+    ax.set_title("Fit time by dataset (mean, first run included)")
     ax.set_ylabel("seconds")
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=35, ha="right")
@@ -787,6 +825,30 @@ def plot_suite_summary(rows: list[dict], output_dir: Path) -> None:
     fig.savefig(output_dir / "suite_fit_seconds.svg", format="svg")
     plt.close(fig)
 
+    if any(row.get("dire_fit_seconds_warm_mean") is not None for row in rows):
+        fig, ax = plt.subplots(figsize=(fig_width, 5.0))
+        ax.bar(
+            x - width / 2,
+            [row["dire_fit_seconds_warm_mean"] for row in rows],
+            width,
+            label="DiReEVoC",
+        )
+        ax.bar(
+            x + width / 2,
+            [row["pure_fit_seconds_warm_mean"] for row in rows],
+            width,
+            label="Pure EVoC",
+        )
+        ax.set_title("Fit time by dataset (warm mean, first run discarded)")
+        ax.set_ylabel("seconds")
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=35, ha="right")
+        ax.grid(axis="y", alpha=0.25)
+        ax.legend(frameon=False, ncol=2)
+        fig.tight_layout()
+        fig.savefig(output_dir / "suite_fit_seconds_warm.svg", format="svg")
+        plt.close(fig)
+
 
 def list_datasets() -> None:
     for slug, spec in DATASETS.items():
@@ -795,9 +857,10 @@ def list_datasets() -> None:
             source += f":{spec.openml_id}"
         elif spec.openml_name:
             source += f":{spec.openml_name}"
+        smoke = " smoke" if slug in SMOKE_DATASETS else ""
         default = " default" if slug in DEFAULT_DATASETS else ""
         graph = " graph-optional" if slug in GRAPH_DATASETS else ""
-        print(f"{slug:<20} {source:<28} {spec.label}{default}{graph}")
+        print(f"{slug:<20} {source:<28} {spec.label}{smoke}{default}{graph}")
         if spec.note:
             print(f"{'':<50}{spec.note}")
 
@@ -808,7 +871,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--datasets",
         default="default",
-        help="comma-separated slugs, or one of: default, all, graphs",
+        help="comma-separated slugs, or one of: smoke, default, all, graphs",
     )
     parser.add_argument("--include-graphs", action="store_true")
     parser.add_argument("--output-dir", default="artifacts/dataset-suite")
@@ -838,6 +901,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-neighbors", type=int, default=15)
     parser.add_argument("--predict-neighbors", type=int, default=15)
     parser.add_argument("--max-iter-layout", type=int, default=100)
+    parser.add_argument(
+        "--timing-repeats",
+        type=int,
+        default=1,
+        help=(
+            "repeat each timed benchmark this many times; summary fit_seconds keeps "
+            "the first run included and warm-only fields discard it"
+        ),
+    )
     parser.add_argument("--use-gpu", default="auto", choices=["auto", "true", "false"])
     parser.add_argument(
         "--selector",
@@ -850,6 +922,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    args.timing_repeats = max(1, int(args.timing_repeats))
     if args.list_datasets:
         list_datasets()
         return 0
@@ -865,6 +938,8 @@ def main() -> int:
         "datasets": slugs,
         "output_dir": str(output_dir),
         "cache_dir": str(dataset_dir),
+        "timing_repeats": int(args.timing_repeats),
+        "timing_policy": "mean_all_first_included",
         "runs": [],
     }
     rows = []
@@ -917,6 +992,7 @@ def main() -> int:
         str(output_dir / "suite_auto_ari.svg"),
         str(output_dir / "suite_auto_delta.svg"),
         str(output_dir / "suite_fit_seconds.svg"),
+        str(output_dir / "suite_fit_seconds_warm.svg"),
     ]
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(json.dumps(manifest, indent=2))

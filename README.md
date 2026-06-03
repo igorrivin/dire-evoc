@@ -75,7 +75,8 @@ structure is present and the DiRe layout is a better clustering substrate than t
 vectors. The table below is from the checked CUDA Docker repro on an NVIDIA A10, using
 the same dataset-specific EVoC `base_min_cluster_size` and `base_n_clusters` controls
 for DiReEVoC and pure EVoC; see `docs/benchmarks.md` and the local
-`artifacts/cuda-bmc-tuned/` artifact tree.
+`artifacts/cuda-timing-repeats-default/` artifact tree. Timings are 20-run means with
+the first run included; warm-only means are also recorded in the metrics.
 
 ![CUDA auto ARI comparison](docs/_static/benchmark_auto_ari.svg)
 
@@ -85,44 +86,44 @@ for DiReEVoC and pure EVoC; see `docs/benchmarks.md` and the local
 
 | Dataset | DiReEVoC auto ARI | Pure EVoC auto ARI | Notes |
 | --- | ---: | ---: | --- |
-| Synthetic blobs 12k | 1.000 | 1.000 | Matched `base_min_cluster_size=100` |
+| Synthetic blobs 12k | 0.968 | 1.000 | Matched `base_min_cluster_size=100` |
 | Synthetic moons 12k | 1.000 | 1.000 | Matched `base_min_cluster_size=100`, `base_n_clusters=2` |
 | Synthetic circles 12k | 1.000 | 1.000 | Matched `base_min_cluster_size=100`, `base_n_clusters=2` |
-| MNIST | 0.723 | 0.813 | Pure EVoC wins in this 24k HF-backed run |
-| sklearn digits | 0.294 | 0.305 | Small image data; fixed-k favors Pure EVoC |
+| MNIST | 0.720 | 0.813 | Pure EVoC wins in this 24k HF-backed run |
+| sklearn digits | 0.261 | 0.305 | Small image data; fixed-k favors Pure EVoC |
 | sklearn iris | 0.562 | 0.236 | DiReEVoC auto win; fixed-k is close |
-| sklearn wine | 0.277 | 0.121 | DiReEVoC auto win in this tuned run |
+| sklearn wine | 0.465 | 0.121 | DiReEVoC auto win in this tuned run |
 | sklearn breast cancer | 0.404 | 0.116 | DiReEVoC win; fixed-k is stronger |
 | Fashion-MNIST | 0.440 | 0.390 | DiReEVoC win; stronger at fixed-k |
 | DBpedia-14 BGE-small | 0.607 | 0.623 | Pure EVoC slightly wins in this 39.2k run |
-| Olivetti faces | 0.028 | 0.063 | Tiny data; both poor |
+| Olivetti faces | 0.022 | 0.063 | Tiny data; both poor |
 | Forest CoverType | 0.016 | -0.026 | DiReEVoC slight win; both poor |
-| CIFAR-10 | 0.030 | 0.023 | Small raw-pixel stress test; both poor |
+| CIFAR-10 | 0.029 | 0.012 | 30k images, average-pooled to 16x16 RGB (`d=768`) |
 
 Runtime from the same CUDA run:
 
 | Dataset | DiReEVoC fit | Pure EVoC fit |
 | --- | ---: | ---: |
-| Synthetic blobs 12k | 10.33s | 11.70s |
-| Synthetic moons 12k | 5.68s | 0.27s |
-| Synthetic circles 12k | 5.66s | 0.26s |
-| MNIST | 27.92s | 0.74s |
-| sklearn digits | 9.91s | 0.19s |
-| sklearn iris | 6.63s | 0.23s |
-| sklearn wine | 7.31s | 0.16s |
-| sklearn breast cancer | 7.53s | 0.17s |
-| Fashion-MNIST | 27.54s | 0.76s |
-| DBpedia-14 BGE-small | 23.76s | 0.76s |
-| Olivetti faces | 7.38s | 0.28s |
-| Forest CoverType | 23.49s | 0.59s |
-| CIFAR-10 | 10.33s | 0.41s |
+| Synthetic blobs 12k | 3.43s | 0.73s |
+| Synthetic moons 12k | 1.65s | 0.15s |
+| Synthetic circles 12k | 1.67s | 0.15s |
+| MNIST | 20.75s | 1.17s |
+| sklearn digits | 3.08s | 0.08s |
+| sklearn iris | 0.51s | 0.06s |
+| sklearn wine | 0.57s | 0.06s |
+| sklearn breast cancer | 0.96s | 0.06s |
+| Fashion-MNIST | 23.33s | 0.63s |
+| DBpedia-14 BGE-small | 15.83s | 0.65s |
+| Olivetti faces | 0.89s | 0.20s |
+| Forest CoverType | 16.21s | 0.48s |
+| CIFAR-10 | 15.30s | 1.51s |
 
 ![CUDA fit runtime ratio](docs/_static/benchmark_fit_ratio.svg)
 
 The honest boundary:
 
 - This is not a universal clustering-quality win.
-- DiRe is data-hungry; tiny datasets are a poor fit.
+- DiRe is data-hungry; tiny datasets and weak feature representations are poor fits.
 - Layer selection is still a real failure mode. The tuned run makes moons/circles
   feasible by setting the known two-cluster base layer for both methods, but MNIST,
   digits, Fashion-MNIST, DBpedia, Olivetti, and CoverType still expose selector and
@@ -179,17 +180,24 @@ The visual benchmark example writes `metrics.json`, `metrics.csv`, `quality_ari.
 phase timings, intrinsic dimension from DiRe's existing kNN graph, selected-layer noise,
 cluster counts, and optional hold-out prediction metrics.
 
-Run a broader dataset suite against the same pure EVoC baseline:
+Run the synthetic smoke suite, or run the broader default suite against the same pure
+EVoC baseline:
 
 ```bash
 python examples/benchmark_dataset_suite.py --list-datasets
+python examples/benchmark_dataset_suite.py --datasets smoke \
+  --output-dir artifacts/smoke-suite --timing-repeats 20
 python examples/benchmark_dataset_suite.py --datasets default \
-  --output-dir artifacts/dataset-suite --test-fraction 0.2
+  --output-dir artifacts/dataset-suite --test-fraction 0.2 --timing-repeats 20
 ```
 
-The default suite includes synthetic blobs, moons, circles, sklearn digits, iris, wine,
-breast cancer, MNIST, Fashion-MNIST, DBpedia-14 embeddings, Olivetti faces, Forest
-CoverType, and CIFAR-10. OpenML is tried first by default. If OpenML fails, datasets that
+The `smoke` preset is only synthetic blobs, moons, and circles. The `default` suite keeps
+those same three synthetic examples at the front of the larger reproducibility run, then
+adds sklearn digits, iris, wine, breast cancer, MNIST, Fashion-MNIST, DBpedia-14
+embeddings, Olivetti faces, Forest CoverType, and CIFAR-10. CIFAR-10 is average-pooled to
+16x16 RGB features for this benchmark so it stays on the DiRe cuVS kNN path. Timing
+summaries include the first run in `fit_seconds` and also write warm-only means such as
+`fit_seconds_warm_mean`. OpenML is tried first by default. If OpenML fails, datasets that
 are fully available in sklearn use the sklearn fallback first, as Forest CoverType does
 through `fetch_covtype`; other mirrored OpenML datasets fall back to Hugging Face
 (`ylecun/mnist`, `zalando-datasets/fashion_mnist`, or `uoft-cs/cifar10`).
