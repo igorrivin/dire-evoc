@@ -80,6 +80,50 @@ The smoke-only synthetic run and the default run are also merged into one bundle
 
 ![Combined smoke and default fit time](_static/benchmark_combined_fit_seconds.svg)
 
+## Scale CUDA run
+
+The scale preset answers a different question from the 20-repeat default suite. It uses
+one timed fit per dataset (`timing_policy=single_run`), full train+test image corpora
+where available, full DBpedia-14 embeddings, full Forest CoverType, and graph-feature
+datasets with working loaders. The completed CUDA artifact tree is
+`artifacts/scale-163-192-62-0/`, and the run manifest reports success. Facebook Page-Page
+was removed from the benchmark preset because the upstream PyG download URL returned 404;
+Wiki-CS is the torch-geometric graph-feature row in the scale preset.
+
+![Scale CUDA auto ARI](_static/benchmark_scale_auto_ari.svg)
+
+| dataset | n train | d | cls | DiReEVoC auto | pure EVoC auto | delta |
+|---|---:|---:|---:|---:|---:|---:|
+| Synthetic blobs 30k | 30,000 | 32 | 8 | 1.000 | 1.000 | +0.000 |
+| Synthetic moons 30k | 30,000 | 8 | 2 | 1.000 | 1.000 | +0.000 |
+| Synthetic circles 30k | 30,000 | 8 | 2 | 1.000 | 1.000 | +0.000 |
+| MNIST | 70,000 | 784 | 10 | 0.884 | 0.892 | -0.008 |
+| Fashion-MNIST | 70,000 | 784 | 10 | 0.384 | 0.327 | +0.057 |
+| CIFAR-10 | 60,000 | 768 | 10 | 0.029 | 0.009 | +0.020 |
+| DBpedia-14 BGE-small | 560,000 | 384 | 14 | 0.454 | 0.492 | -0.038 |
+| Forest CoverType | 581,012 | 54 | 7 | 0.007 | -0.014 | +0.021 |
+| Olivetti faces | 400 | 4,096 | 40 | 0.056 | 0.057 | -0.000 |
+| Wiki-CS | 11,701 | 300 | 10 | 0.203 | 0.140 | +0.063 |
+| OGBN-Arxiv | 169,343 | 128 | 40 | 0.007 | 0.016 | -0.009 |
+
+![Scale CUDA fit runtime](_static/benchmark_scale_fit_seconds.svg)
+
+| dataset | DiReEVoC single fit | pure EVoC single fit |
+|---|---:|---:|
+| Synthetic blobs 30k | 9.50s | 12.09s |
+| Synthetic moons 30k | 6.40s | 0.48s |
+| Synthetic circles 30k | 6.06s | 0.49s |
+| MNIST | 64.47s | 1.78s |
+| Fashion-MNIST | 56.68s | 1.81s |
+| CIFAR-10 | 23.08s | 1.65s |
+| DBpedia-14 BGE-small | 1,636.04s | 13.09s |
+| Forest CoverType | 465.55s | 8.11s |
+| Olivetti faces | 7.36s | 0.33s |
+| Wiki-CS | 17.47s | 11.74s |
+| OGBN-Arxiv | 57.21s | 2.73s |
+
+![Scale CUDA fit runtime ratio](_static/benchmark_scale_fit_ratio.svg)
+
 ## Layer selection
 
 `DiReEVoC` uses coverage-weighted silhouette by default: mean silhouette over all points,
@@ -210,4 +254,10 @@ python examples/benchmark_dataset_suite.py \
 The preset uses 30k synthetic blobs/moons/circles, full MNIST and Fashion-MNIST when
 OpenML or the Hugging Face train+test mirror is available, full CIFAR-10
 (`60k`, not `100k`), full DBpedia-14 embeddings when materialized with `--full`, full
-Forest CoverType, full Olivetti faces, full Facebook Page-Page, and full OGBN-Arxiv.
+Forest CoverType, full Olivetti faces, Wiki-CS, and full OGBN-Arxiv. Rebuild the scale
+figures from the downloaded artifact tree with:
+
+```bash
+python scripts/plot_benchmark_metrics.py \
+  --scale-artifacts artifacts/scale-163-192-62-0
+```

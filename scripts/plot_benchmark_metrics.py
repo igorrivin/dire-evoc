@@ -4,7 +4,8 @@
 The benchmark artifacts remain the source of truth. By default this script reads the
 local CUDA repeated-timing artifact trees, regenerates suite-level summaries using warm
 mean fit time as the primary runtime metric, writes the combined smoke+default figures,
-and copies the documentation SVG names into ``docs/_static``.
+optionally rebuilds a scale-suite artifact tree, and copies the documentation SVG names
+into ``docs/_static``.
 """
 
 from __future__ import annotations
@@ -26,18 +27,14 @@ if str(EXAMPLES) not in sys.path:
     sys.path.insert(0, str(EXAMPLES))
 
 from benchmark_dataset_suite import metrics_row, plot_suite_summary, write_summary_csv
+from benchmark_dataset_suite import timing_title
 
 
 DEFAULT_ARTIFACTS = ROOT / "artifacts" / "cuda-timing-repeats-default"
 SMOKE_ARTIFACTS = ROOT / "artifacts" / "cuda-timing-repeats-smoke"
 COMBINED_ARTIFACTS = ROOT / "artifacts" / "cuda-timing-repeats-combined"
+SCALE_ARTIFACTS = ROOT / "artifacts" / "cuda-scale"
 DOCS_STATIC = ROOT / "docs" / "_static"
-
-
-PRIMARY_TIMING_TITLES = {
-    "warm_mean": "warm mean, first run discarded",
-    "mean_all": "mean, first run included",
-}
 
 
 def read_suite_slugs(artifact_dir: Path) -> list[str]:
@@ -156,6 +153,24 @@ def copy_suite_svgs_to_docs(
         copy_svg(src, dst)
 
 
+def copy_scale_svgs_to_docs(scale_dir: Path, docs_static: Path) -> None:
+    copies = {
+        scale_dir / "suite_auto_ari.svg": docs_static / "benchmark_scale_auto_ari.svg",
+        scale_dir / "suite_auto_delta.svg": docs_static / "benchmark_scale_auto_delta.svg",
+        scale_dir / "suite_fit_seconds.svg": docs_static / "benchmark_scale_fit_seconds.svg",
+        scale_dir
+        / "suite_fit_seconds_warm.svg": docs_static
+        / "benchmark_scale_fit_seconds_warm.svg",
+        scale_dir
+        / "suite_fit_seconds_mean_all.svg": docs_static
+        / "benchmark_scale_fit_seconds_mean_all.svg",
+        scale_dir / "suite_fixed_k_ari.svg": docs_static / "benchmark_scale_fixed_k_ari.svg",
+        scale_dir / "suite_fit_ratio.svg": docs_static / "benchmark_scale_fit_ratio.svg",
+    }
+    for src, dst in copies.items():
+        copy_svg(src, dst)
+
+
 def style_axis(ax) -> None:
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -235,7 +250,7 @@ def runtime_ratio_bar(rows: list[dict], path: Path, timing_primary: str) -> None
     fig, ax = plt.subplots(figsize=(max(10.2, len(labels) * 0.78), 4.9))
     bars = ax.bar(np.arange(len(labels)), ratios, color=colors)
     ax.axhline(1.0, color="#2b2b2b", linewidth=1)
-    ax.set_title(f"Runtime ratio: DiReEVoC / Pure EVoC ({PRIMARY_TIMING_TITLES[timing_primary]})")
+    ax.set_title(f"Runtime ratio: DiReEVoC / Pure EVoC ({timing_title(rows, timing_primary)})")
     ax.set_ylabel("fit time ratio, log scale")
     ax.set_yscale("log")
     ax.set_xticks(np.arange(len(labels)))
@@ -312,6 +327,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--default-artifacts", type=Path, default=DEFAULT_ARTIFACTS)
     parser.add_argument("--smoke-artifacts", type=Path, default=SMOKE_ARTIFACTS)
     parser.add_argument("--combined-artifacts", type=Path, default=COMBINED_ARTIFACTS)
+    parser.add_argument("--scale-artifacts", type=Path, default=SCALE_ARTIFACTS)
     parser.add_argument("--docs-static", type=Path, default=DOCS_STATIC)
     parser.add_argument(
         "--timing-primary",
@@ -323,6 +339,11 @@ def parse_args() -> argparse.Namespace:
         "--skip-combined",
         action="store_true",
         help="only rebuild the default-suite docs figures",
+    )
+    parser.add_argument(
+        "--skip-scale",
+        action="store_true",
+        help="do not rebuild scale-suite docs figures, even if scale artifacts exist",
     )
     return parser.parse_args()
 
@@ -372,12 +393,31 @@ def main() -> int:
         args.docs_static / "benchmark_fit_ratio.svg",
     )
 
+    scale_rows = []
+    if not args.skip_scale and args.scale_artifacts.exists():
+        scale_rows = load_suite_rows(args.scale_artifacts, args.timing_primary)
+        write_artifact_summary(scale_rows, args.scale_artifacts, args.timing_primary)
+        grouped_ari_bar(
+            scale_rows,
+            args.scale_artifacts / "suite_fixed_k_ari.svg",
+            "CUDA scale benchmark fixed-k ARI",
+            "dire_fixed_k_ari",
+            "pure_fixed_k_ari",
+        )
+        runtime_ratio_bar(
+            scale_rows,
+            args.scale_artifacts / "suite_fit_ratio.svg",
+            args.timing_primary,
+        )
+        copy_scale_svgs_to_docs(args.scale_artifacts, args.docs_static)
+
     print(
         json.dumps(
             {
                 "timing_primary": args.timing_primary,
                 "default_rows": len(default_rows),
                 "combined_rows": len(combined_rows),
+                "scale_rows": len(scale_rows),
                 "docs_static": str(args.docs_static),
             },
             indent=2,

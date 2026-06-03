@@ -101,6 +101,14 @@ def dataset_suite_command(args: argparse.Namespace, output_dir: Path) -> list[st
     return command
 
 
+def timing_policy(timing_repeats: int, timing_primary: str) -> str:
+    if max(1, int(timing_repeats)) == 1:
+        return "single_run"
+    if timing_primary == "mean_all":
+        return "mean_all_first_included"
+    return "warm_mean_first_discarded"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default="artifacts/cuda")
@@ -177,11 +185,7 @@ def main() -> int:
         "prefer_hf": args.prefer_hf,
         "timing_repeats": int(args.timing_repeats),
         "timing_primary": args.timing_primary,
-        "timing_policy": (
-            "mean_all_first_included"
-            if args.timing_primary == "mean_all"
-            else "warm_mean_first_discarded"
-        ),
+        "timing_policy": timing_policy(args.timing_repeats, args.timing_primary),
         "runs": [],
     }
 

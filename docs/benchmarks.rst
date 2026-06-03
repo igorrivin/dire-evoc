@@ -217,6 +217,89 @@ The smoke-only synthetic run and the default run are also merged into one local 
 .. image:: _static/benchmark_combined_fit_seconds.svg
    :alt: Combined smoke and default fit runtime comparison
 
+Scale CUDA run
+--------------
+
+The scale preset uses a different timing policy from the default suite. It runs one
+timed fit per dataset (``timing_policy=single_run``), uses full train+test image corpora
+where available, and includes graph-feature datasets with working loaders. The completed
+CUDA artifact tree is ``artifacts/scale-163-192-62-0/``. Facebook Page-Page was removed
+from the benchmark preset because the upstream PyG download URL returned 404; Wiki-CS is
+the torch-geometric graph-feature row in the scale preset.
+
+.. image:: _static/benchmark_scale_auto_ari.svg
+   :alt: Scale CUDA auto ARI comparison for DiReEVoC and pure EVoC
+
+.. list-table::
+   :header-rows: 1
+
+   * - Dataset
+     - n train
+     - d
+     - DiReEVoC auto ARI
+     - Pure EVoC auto ARI
+   * - Synthetic blobs 30k
+     - 30,000
+     - 32
+     - 1.000
+     - 1.000
+   * - Synthetic moons 30k
+     - 30,000
+     - 8
+     - 1.000
+     - 1.000
+   * - Synthetic circles 30k
+     - 30,000
+     - 8
+     - 1.000
+     - 1.000
+   * - MNIST
+     - 70,000
+     - 784
+     - 0.884
+     - 0.892
+   * - Fashion-MNIST
+     - 70,000
+     - 784
+     - 0.384
+     - 0.327
+   * - CIFAR-10
+     - 60,000
+     - 768
+     - 0.029
+     - 0.009
+   * - DBpedia-14 BGE-small
+     - 560,000
+     - 384
+     - 0.454
+     - 0.492
+   * - Forest CoverType
+     - 581,012
+     - 54
+     - 0.007
+     - -0.014
+   * - Olivetti faces
+     - 400
+     - 4,096
+     - 0.056
+     - 0.057
+   * - Wiki-CS
+     - 11,701
+     - 300
+     - 0.203
+     - 0.140
+   * - OGBN-Arxiv
+     - 169,343
+     - 128
+     - 0.007
+     - 0.016
+
+.. image:: _static/benchmark_scale_fit_seconds.svg
+   :alt: Scale CUDA fit runtime comparison for DiReEVoC and pure EVoC
+
+.. image:: _static/benchmark_scale_fit_ratio.svg
+   :alt: Scale CUDA fit runtime ratio, DiReEVoC divided by pure EVoC
+
 Comparative metrics
 -------------------
 
@@ -318,6 +401,28 @@ the README/Sphinx figures from existing artifacts with:
 .. code-block:: bash
 
    python scripts/plot_benchmark_metrics.py
+
+For the one-run scale preset:
+
+.. code-block:: bash
+
+   python examples/benchmark_dataset_suite.py \
+      --datasets scale \
+      --output-dir artifacts/scale-suite \
+      --prefer-hf \
+      --timing-repeats 1 \
+      --test-fraction 0.0 \
+      --continue-on-error
+
+The preset uses 30k synthetic blobs/moons/circles, full MNIST, full Fashion-MNIST, full
+CIFAR-10 (``60k``, not ``100k``), full DBpedia-14 embeddings, full Forest CoverType,
+Olivetti faces, Wiki-CS, and full OGBN-Arxiv. Regenerate scale figures from a downloaded
+artifact tree with:
+
+.. code-block:: bash
+
+   python scripts/plot_benchmark_metrics.py \
+      --scale-artifacts artifacts/scale-163-192-62-0
 
 For a single local benchmark with prepared data:
 

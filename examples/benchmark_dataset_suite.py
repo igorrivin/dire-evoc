@@ -270,14 +270,6 @@ DATASETS: dict[str, DatasetSpec] = {
         default_base_min_cluster_size=100,
         note="Optional graph-feature dataset; requires torch-geometric.",
     ),
-    "facebook_page_page": DatasetSpec(
-        "facebook_page_page",
-        "Facebook Page-Page",
-        "pyg_facebook_page_page",
-        default_subsample=30000,
-        default_base_min_cluster_size=100,
-        note="Optional graph-feature dataset; requires torch-geometric.",
-    ),
     "ogbn_arxiv": DatasetSpec(
         "ogbn_arxiv",
         "OGBN-Arxiv",
@@ -335,7 +327,7 @@ DEFAULT_DATASETS = (
     "covertype",
     "cifar10",
 )
-GRAPH_DATASETS = ("wiki_cs", "facebook_page_page", "ogbn_arxiv")
+GRAPH_DATASETS = ("wiki_cs", "ogbn_arxiv")
 SCALE_BENCHMARK_DATASETS = (
     "blobs30k",
     "moons30k",
@@ -346,7 +338,7 @@ SCALE_BENCHMARK_DATASETS = (
     "dbpedia14",
     "covertype",
     "olivetti_faces",
-    "facebook_page_page",
+    "wiki_cs",
     "ogbn_arxiv",
 )
 
@@ -617,13 +609,6 @@ def pyg_wiki_cs_npz(path: Path, cache_root: Path) -> None:
     save_npz(path, data.x.cpu().numpy(), data.y.cpu().numpy())
 
 
-def pyg_facebook_page_page_npz(path: Path, cache_root: Path) -> None:
-    from torch_geometric.datasets import FacebookPagePage
-
-    data = FacebookPagePage(root=str(cache_root / "pyg" / "facebook_page_page"))[0]
-    save_npz(path, data.x.cpu().numpy(), data.y.cpu().numpy())
-
-
 def ogb_arxiv_npz(path: Path, cache_root: Path) -> None:
     from ogb.nodeproppred import NodePropPredDataset
 
@@ -698,8 +683,6 @@ def materialize_dataset(
             LOCAL_LOADERS[spec.source](path)
     elif spec.source == "pyg_wiki_cs":
         pyg_wiki_cs_npz(path, dataset_dir)
-    elif spec.source == "pyg_facebook_page_page":
-        pyg_facebook_page_page_npz(path, dataset_dir)
     elif spec.source == "ogb_arxiv":
         ogb_arxiv_npz(path, dataset_dir)
     else:
@@ -829,9 +812,26 @@ def metric_seconds(section: dict, key: str, timing_primary: str):
     return section[key]
 
 
+def timing_policy(timing_repeats: int, timing_primary: str) -> str:
+    if max(1, int(timing_repeats)) == 1:
+        return "single_run"
+    if timing_primary == "mean_all":
+        return "mean_all_first_included"
+    return "warm_mean_first_discarded"
+
+
+def timing_title(rows: list[dict], timing_primary: str) -> str:
+    if rows and all(max(1, int(row.get("timing_repeats") or 1)) == 1 for row in rows):
+        return "single run"
+    if timing_primary == "mean_all":
+        return "mean, first run included"
+    return "warm mean, first run discarded"
+
+
 def metrics_row(slug: str, metrics: dict, timing_primary: str) -> dict:
     dire = metrics["dire_evoc"]
     pure = metrics["vanilla_evoc"]
+    timing_repeats = metrics["data"].get("timing_repeats", 1)
     return {
         "slug": slug,
         "dataset": metrics["data"]["label"],
@@ -856,13 +856,9 @@ def metrics_row(slug: str, metrics: dict, timing_primary: str) -> dict:
         "pure_fit_seconds_first": pure.get("fit_seconds_first"),
         "dire_fit_seconds_warm_mean": dire.get("fit_seconds_warm_mean"),
         "pure_fit_seconds_warm_mean": pure.get("fit_seconds_warm_mean"),
-        "timing_repeats": metrics["data"].get("timing_repeats", 1),
+        "timing_repeats": timing_repeats,
         "timing_primary": timing_primary,
-        "timing_policy": (
-            "mean_all_first_included"
-            if timing_primary == "mean_all"
-            else "warm_mean_first_discarded"
-        ),
+        "timing_policy": timing_policy(timing_repeats, timing_primary),
         "output_dir": slug,
     }
 
@@ -920,12 +916,7 @@ def plot_suite_summary(rows: list[dict], output_dir: Path, timing_primary: str) 
     fig, ax = plt.subplots(figsize=(fig_width, 5.0))
     ax.bar(x - width / 2, [row["dire_fit_seconds"] for row in rows], width, label="DiReEVoC")
     ax.bar(x + width / 2, [row["pure_fit_seconds"] for row in rows], width, label="Pure EVoC")
-    title_suffix = (
-        "mean, first run included"
-        if timing_primary == "mean_all"
-        else "warm mean, first run discarded"
-    )
-    ax.set_title(f"Fit time by dataset ({title_suffix})")
+    ax.set_title(f"Fit time by dataset ({timing_title(rows, timing_primary)})")
     ax.set_ylabel("seconds")
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=35, ha="right")
@@ -949,7 +940,7 @@ def plot_suite_summary(rows: list[dict], output_dir: Path, timing_primary: str) 
             width,
             label="Pure EVoC",
         )
-        ax.set_title("Fit time by dataset (mean, first run included)")
+        ax.set_title(f"Fit time by dataset ({timing_title(rows, 'mean_all')})")
         ax.set_ylabel("seconds")
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=35, ha="right")
@@ -973,7 +964,7 @@ def plot_suite_summary(rows: list[dict], output_dir: Path, timing_primary: str) 
             width,
             label="Pure EVoC",
         )
-        ax.set_title("Fit time by dataset (warm mean, first run discarded)")
+        ax.set_title(f"Fit time by dataset ({timing_title(rows, 'warm_mean')})")
         ax.set_ylabel("seconds")
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=35, ha="right")
@@ -1083,11 +1074,7 @@ def main() -> int:
         "cache_dir": str(dataset_dir),
         "timing_repeats": int(args.timing_repeats),
         "timing_primary": args.timing_primary,
-        "timing_policy": (
-            "mean_all_first_included"
-            if args.timing_primary == "mean_all"
-            else "warm_mean_first_discarded"
-        ),
+        "timing_policy": timing_policy(args.timing_repeats, args.timing_primary),
         "runs": [],
     }
     rows = []

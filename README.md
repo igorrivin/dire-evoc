@@ -121,6 +121,28 @@ Runtime from the same CUDA run:
 
 ![CUDA fit runtime ratio](docs/_static/benchmark_fit_ratio.svg)
 
+A separate full-scale sweep uses one fit per dataset, full train+test image corpora where
+available, and the same matched EVoC controls. The completed CUDA artifact tree is
+`artifacts/scale-163-192-62-0/`; `timing_policy` is `single_run`.
+
+![CUDA scale auto ARI comparison](docs/_static/benchmark_scale_auto_ari.svg)
+
+![CUDA scale fit runtime comparison](docs/_static/benchmark_scale_fit_seconds.svg)
+
+| Scale dataset | n train | DiReEVoC auto ARI | Pure EVoC auto ARI | DiReEVoC fit | Pure EVoC fit |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Synthetic blobs 30k | 30,000 | 1.000 | 1.000 | 9.50s | 12.09s |
+| Synthetic moons 30k | 30,000 | 1.000 | 1.000 | 6.40s | 0.48s |
+| Synthetic circles 30k | 30,000 | 1.000 | 1.000 | 6.06s | 0.49s |
+| MNIST full | 70,000 | 0.884 | 0.892 | 64.47s | 1.78s |
+| Fashion-MNIST full | 70,000 | 0.384 | 0.327 | 56.68s | 1.81s |
+| CIFAR-10 full | 60,000 | 0.029 | 0.009 | 23.08s | 1.65s |
+| DBpedia-14 BGE-small full | 560,000 | 0.454 | 0.492 | 1,636.04s | 13.09s |
+| Forest CoverType full | 581,012 | 0.007 | -0.014 | 465.55s | 8.11s |
+| Olivetti faces full | 400 | 0.056 | 0.057 | 7.36s | 0.33s |
+| Wiki-CS full | 11,701 | 0.203 | 0.140 | 17.47s | 11.74s |
+| OGBN-Arxiv full | 169,343 | 0.007 | 0.016 | 57.21s | 2.73s |
+
 The honest boundary:
 
 - This is not a universal clustering-quality win.
@@ -206,8 +228,8 @@ through `fetch_covtype`; other mirrored OpenML datasets fall back to Hugging Fac
 (`ylecun/mnist`, `zalando-datasets/fashion_mnist`, or `uoft-cs/cifar10`).
 OpenML-only datasets such as USPS, SVHN, UMIST faces, Letter,
 OptDigits, PenDigits, SatImage, Segment, and Vehicle remain available by explicit slug.
-Optional graph-feature datasets include Wiki-CS, Facebook Page-Page, and OGBN-Arxiv when
-their extra loaders are installed.
+Optional graph-feature datasets include Wiki-CS and OGBN-Arxiv when their extra loaders
+are installed.
 
 The default DiRe layout dimension is `n_components=8`. To check whether a smaller
 layout is enough, and to tune EVoC controls without rebuilding DiRe for every trial, use
@@ -233,8 +255,8 @@ datasets favor pure EVoC because it has no DiRe layout overhead, while larger da
 can expose pure EVoC's neighbour/MST cost and raw-space density limits. The `scale`
 preset runs one fit per dataset, uses full dataset materializations where the loader can
 provide them, and includes 30k synthetic controls plus full MNIST, Fashion-MNIST,
-CIFAR-10, DBpedia-14 embeddings, Forest CoverType, Olivetti faces, Facebook Page-Page,
-and OGBN-Arxiv:
+CIFAR-10, DBpedia-14 embeddings, Forest CoverType, Olivetti faces, Wiki-CS, and
+OGBN-Arxiv:
 
 ```bash
 python examples/benchmark_dataset_suite.py \
@@ -248,7 +270,13 @@ python examples/benchmark_dataset_suite.py \
 
 CIFAR-10 is 60k images in the standard full train+test corpus. If the intended CIFAR
 target is CIFAR-100 or a combined CIFAR run, add that as a separate dataset slug before
-comparing the scale numbers.
+comparing the scale numbers. To regenerate the checked-in scale figures from local
+artifacts, pass the scale artifact tree explicitly:
+
+```bash
+python scripts/plot_benchmark_metrics.py \
+  --scale-artifacts artifacts/scale-163-192-62-0
+```
 
 Run the full CUDA Docker repro on a CUDA host and download the artifacts locally:
 

@@ -99,6 +99,9 @@ python examples/benchmark_dataset_suite.py --datasets smoke \
   --output-dir artifacts/smoke-suite --timing-repeats 20
 python examples/benchmark_dataset_suite.py --datasets default \
   --output-dir artifacts/dataset-suite --test-fraction 0.2 --timing-repeats 20
+python examples/benchmark_dataset_suite.py --datasets scale \
+  --output-dir artifacts/scale-suite --prefer-hf --timing-repeats 1 \
+  --test-fraction 0.0 --continue-on-error
 ```
 
 The `smoke` preset runs only synthetic blobs, moons, and circles. The default suite keeps
@@ -110,4 +113,8 @@ mirrored OpenML datasets use Hugging Face as fallback. Dataset-specific defaults
 `base_min_cluster_size` matched between DiReEVoC and pure EVoC; moons and circles also
 use `base_n_clusters=2` because their feasible benchmark target is known. Repeated
 timings use warm means in `fit_seconds` by default, while first-run, mean-all, and
-warm-only summaries are written separately.
+warm-only summaries are written separately. The `scale` preset is single-run by design
+and uses full materializations where available: 30k synthetic controls, full MNIST,
+full Fashion-MNIST, full CIFAR-10, full DBpedia-14 embeddings, full Forest CoverType,
+Olivetti faces, Wiki-CS, and OGBN-Arxiv. Optional graph-feature datasets are Wiki-CS
+and OGBN-Arxiv.

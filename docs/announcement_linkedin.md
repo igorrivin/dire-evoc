@@ -10,6 +10,9 @@ and add the pieces that only make sense at the intersection.
 datasets, writes per-dataset SVG/JSON/CSV artifacts, uses matched EVoC base controls for
 DiRe→EVōC and pure EVōC, and records 20-run warm-primary timings plus first-run and
 first-included fields.
+The scale run switches to one timed fit per dataset and covers 30k synthetic controls,
+full MNIST/Fashion-MNIST/CIFAR-10, full DBpedia-14 embeddings, Forest CoverType, Wiki-CS,
+and OGBN-Arxiv.
 DiRe→EVōC wins Fashion-MNIST (**0.440 vs 0.390**), breast cancer (**0.404 vs 0.116**),
 iris (**0.562 vs 0.236**), wine (**0.465 vs 0.121**), and pooled CIFAR-10
 (**0.029 vs 0.012**); moons/circles are feasible ties when both methods use
@@ -22,12 +25,12 @@ builds (TwoNN / Levina–Bickel), no second pass.
 **And — because benchmarks should be honest — what you *don't* get:** it's not a universal
 win. Tiny data and weak feature representations are weak regimes, fixed-k can still be
 much better than auto selection on some datasets, and the DiRe layout cost dominates
-end-to-end time at these benchmark sizes. The CIFAR benchmark uses 30k images
-average-pooled to 16x16 RGB.
+end-to-end time on most recorded rows. The CIFAR benchmark uses average-pooled 16x16 RGB
+features: 30k images in the repeated default repro and 60k in the scale repro.
 
 So: better clustering where clustering is meaningful, free intrinsic dimension, and
-prediction — with a conditional speed-up at scale. Full code + the benchmarks that say
-where it loses: [link]
+prediction — with benchmark artifacts that say where it loses. Full code + the
+reproducible metrics: [link]
 
 Built on the shoulders of @Leland McInnes (EVōC/UMAP/HDBSCAN) and @Alexander Kolpakov
 (DiRe-RAPIDS).
