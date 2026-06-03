@@ -173,3 +173,41 @@ README/Sphinx figures from existing artifacts with:
 ```bash
 python scripts/plot_benchmark_metrics.py
 ```
+
+The default DiRe layout dimension is `n_components=8`. To test whether `4` is good
+enough, and to avoid rebuilding DiRe while tuning EVoC-side controls, run the
+cached-layout tuner on a prepared `.npz` dataset:
+
+```bash
+python examples/benchmark_cached_layout_tuning.py \
+  --npz artifacts/cuda/datasets/fashion_mnist.npz \
+  --label Fashion-MNIST \
+  --output-dir artifacts/cached-layout/fashion_mnist \
+  --n-components-grid 4,8 \
+  --base-min-cluster-size-grid 25,50,100 \
+  --base-n-clusters-grid none,classes
+```
+
+It writes `metrics.json` and `trials.csv`; use `dire_layout_seconds` for the one-time
+layout cost, `cached_trial_seconds` for each EVoC trial on that layout, and
+`full_once_seconds` for the cost of one layout plus one selected trial.
+
+For the scale regime, do not repeat each dataset 20 times. The small-data benchmark is
+expected to favor pure EVoC because pure EVoC has no DiRe layout overhead. The larger
+question is whether pure EVoC's neighbour/MST cost and raw-space density quality degrade
+on larger corpora. Use the one-run `scale` preset:
+
+```bash
+python examples/benchmark_dataset_suite.py \
+  --datasets scale \
+  --output-dir artifacts/scale-suite \
+  --prefer-hf \
+  --timing-repeats 1 \
+  --test-fraction 0.0 \
+  --continue-on-error
+```
+
+The preset uses 30k synthetic blobs/moons/circles, full MNIST and Fashion-MNIST when
+OpenML or the Hugging Face train+test mirror is available, full CIFAR-10
+(`60k`, not `100k`), full DBpedia-14 embeddings when materialized with `--full`, full
+Forest CoverType, full Olivetti faces, full Facebook Page-Page, and full OGBN-Arxiv.

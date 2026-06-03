@@ -28,6 +28,8 @@ Environment overrides:
 Examples:
   scripts/run_remote_cuda_repro.sh user@gpu-host --skip-dbpedia
   LOCAL_OUTPUT=artifacts/a10-full scripts/run_remote_cuda_repro.sh user@gpu-host
+  LOCAL_OUTPUT=artifacts/scale scripts/run_remote_cuda_repro.sh user@gpu-host \
+    --datasets scale --prefer-hf --timing-repeats 1 --continue-on-error
 USAGE
 }
 

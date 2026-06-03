@@ -209,6 +209,47 @@ OptDigits, PenDigits, SatImage, Segment, and Vehicle remain available by explici
 Optional graph-feature datasets include Wiki-CS, Facebook Page-Page, and OGBN-Arxiv when
 their extra loaders are installed.
 
+The default DiRe layout dimension is `n_components=8`. To check whether a smaller
+layout is enough, and to tune EVoC controls without rebuilding DiRe for every trial, use
+the cached-layout tuner. It builds one DiRe layout per value in `--n-components-grid`,
+then sweeps EVoC-side controls on the cached layout:
+
+```bash
+python examples/benchmark_cached_layout_tuning.py \
+  --npz artifacts/cuda/datasets/fashion_mnist.npz \
+  --label Fashion-MNIST \
+  --output-dir artifacts/cached-layout/fashion_mnist \
+  --n-components-grid 4,8 \
+  --base-min-cluster-size-grid 25,50,100 \
+  --base-n-clusters-grid none,classes
+```
+
+The tuner writes `metrics.json` and `trials.csv`; compare `dire_layout_seconds`,
+`cached_trial_seconds`, `full_once_seconds`, and ARI columns to separate layout cost from
+EVoC tuning cost.
+
+The full-scale timing hypothesis is different from the 20-run default suite: small
+datasets favor pure EVoC because it has no DiRe layout overhead, while larger datasets
+can expose pure EVoC's neighbour/MST cost and raw-space density limits. The `scale`
+preset runs one fit per dataset, uses full dataset materializations where the loader can
+provide them, and includes 30k synthetic controls plus full MNIST, Fashion-MNIST,
+CIFAR-10, DBpedia-14 embeddings, Forest CoverType, Olivetti faces, Facebook Page-Page,
+and OGBN-Arxiv:
+
+```bash
+python examples/benchmark_dataset_suite.py \
+  --datasets scale \
+  --output-dir artifacts/scale-suite \
+  --prefer-hf \
+  --timing-repeats 1 \
+  --test-fraction 0.0 \
+  --continue-on-error
+```
+
+CIFAR-10 is 60k images in the standard full train+test corpus. If the intended CIFAR
+target is CIFAR-100 or a combined CIFAR run, add that as a separate dataset slug before
+comparing the scale numbers.
+
 Run the full CUDA Docker repro on a CUDA host and download the artifacts locally:
 
 ```bash

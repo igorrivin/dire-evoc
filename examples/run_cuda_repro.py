@@ -9,6 +9,11 @@ summaries.
 Typical Docker run:
 
     python3 examples/run_cuda_repro.py --output-dir artifacts/cuda
+
+Full-scale one-run regime:
+
+    python3 examples/run_cuda_repro.py --datasets scale --prefer-hf \
+        --timing-repeats 1 --continue-on-error --output-dir artifacts/scale
 """
 
 from __future__ import annotations
@@ -102,7 +107,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--datasets",
         default="default",
-        help="dataset suite selection: smoke, default, all, graphs, or comma-separated slugs",
+        help="dataset suite selection: smoke, default, scale, all, graphs, or comma-separated slugs",
     )
     parser.add_argument("--include-graphs", action="store_true")
     parser.add_argument("--continue-on-error", action="store_true")
@@ -116,7 +121,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--subsample", type=int, default=None)
     parser.add_argument("--full", action="store_true")
-    parser.add_argument("--test-fraction", type=float, default=0.2)
+    parser.add_argument(
+        "--test-fraction",
+        type=float,
+        default=None,
+        help="holdout fraction; defaults to 0.0 for scale and 0.2 otherwise",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--min-samples", type=int, default=10)
     parser.add_argument("--base-min-cluster-size", type=int, default=None)
@@ -153,6 +163,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     args.timing_repeats = max(1, int(args.timing_repeats))
+    if args.test_fraction is None:
+        args.test_fraction = 0.0 if args.datasets == "scale" else 0.2
+    if args.datasets == "scale":
+        args.full = True
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 

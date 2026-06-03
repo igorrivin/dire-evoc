@@ -14,6 +14,9 @@ Examples:
     python examples/benchmark_dataset_suite.py --datasets default \
         --output-dir artifacts/openml-suite --test-fraction 0.2
 
+    python examples/benchmark_dataset_suite.py --datasets scale \
+        --output-dir artifacts/scale-suite --prefer-hf --timing-repeats 1
+
     python examples/benchmark_dataset_suite.py --datasets blobs,mnist,fashion_mnist,covertype \
         --output-dir artifacts/openml-smoke --subsample 12000 --skip-existing
 
@@ -48,6 +51,7 @@ class DatasetSpec:
     hf_name: str | None = None
     hf_kind: str = "image"
     hf_split: str = "train"
+    hf_full_split: str | None = None
     hf_image_column: str = "image"
     hf_label_column: str = "label"
     hf_max_rows: int | None = None
@@ -122,6 +126,7 @@ DATASETS: dict[str, DatasetSpec] = {
         openml_id=554,
         hf_name="ylecun/mnist",
         hf_kind="image",
+        hf_full_split="train+test",
         default_subsample=30000,
         default_base_min_cluster_size=100,
         note="OpenML mnist_784; falls back to Hugging Face ylecun/mnist.",
@@ -133,6 +138,7 @@ DATASETS: dict[str, DatasetSpec] = {
         openml_id=40996,
         hf_name="zalando-datasets/fashion_mnist",
         hf_kind="image",
+        hf_full_split="train+test",
         default_subsample=30000,
         default_base_min_cluster_size=100,
         note="OpenML Fashion-MNIST; falls back to Hugging Face zalando-datasets/fashion_mnist.",
@@ -152,6 +158,7 @@ DATASETS: dict[str, DatasetSpec] = {
         openml_id=40927,
         hf_name="uoft-cs/cifar10",
         hf_kind="image",
+        hf_full_split="train+test",
         hf_image_column="img",
         hf_image_pool=2,
         default_subsample=30000,
@@ -281,6 +288,34 @@ DATASETS: dict[str, DatasetSpec] = {
     ),
 }
 
+SCALE_DATASETS: dict[str, DatasetSpec] = {
+    "blobs30k": DatasetSpec(
+        "blobs30k",
+        "Synthetic blobs 30k",
+        "synthetic_blobs_30k",
+        default_base_min_cluster_size=100,
+        note="Generated locally; 30k density-separated clusters.",
+    ),
+    "moons30k": DatasetSpec(
+        "moons30k",
+        "Synthetic moons 30k",
+        "synthetic_moons_30k",
+        default_base_min_cluster_size=100,
+        default_base_n_clusters=2,
+        note="Generated locally; 30k nonlinear two-cluster geometry.",
+    ),
+    "circles30k": DatasetSpec(
+        "circles30k",
+        "Synthetic circles 30k",
+        "synthetic_circles_30k",
+        default_base_min_cluster_size=100,
+        default_base_n_clusters=2,
+        note="Generated locally; 30k nested nonlinear cluster geometry.",
+    ),
+}
+
+DATASETS.update(SCALE_DATASETS)
+
 
 SMOKE_DATASETS = (
     "blobs",
@@ -301,6 +336,19 @@ DEFAULT_DATASETS = (
     "cifar10",
 )
 GRAPH_DATASETS = ("wiki_cs", "facebook_page_page", "ogbn_arxiv")
+SCALE_BENCHMARK_DATASETS = (
+    "blobs30k",
+    "moons30k",
+    "circles30k",
+    "mnist",
+    "fashion_mnist",
+    "cifar10",
+    "dbpedia14",
+    "covertype",
+    "olivetti_faces",
+    "facebook_page_page",
+    "ogbn_arxiv",
+)
 
 
 def safe_slug(value: str) -> str:
@@ -352,7 +400,12 @@ def save_npz(path: Path, X, y) -> None:
     np.savez(path, X=X, y=encoded_y)
 
 
-def fetch_openml_npz(spec: DatasetSpec, path: Path, allow_hf_fallback: bool = True) -> None:
+def fetch_openml_npz(
+    spec: DatasetSpec,
+    path: Path,
+    allow_hf_fallback: bool = True,
+    full: bool = False,
+) -> None:
     from sklearn.datasets import fetch_openml
 
     kwargs = {"as_frame": False}
@@ -367,7 +420,7 @@ def fetch_openml_npz(spec: DatasetSpec, path: Path, allow_hf_fallback: bool = Tr
         except TypeError:
             ds = fetch_openml(**kwargs)
     except Exception:
-        fetch_openml_fallback_npz(spec, path, allow_hf=allow_hf_fallback)
+        fetch_openml_fallback_npz(spec, path, allow_hf=allow_hf_fallback, full=full)
         return
     save_npz(path, ds.data, ds.target)
 
@@ -376,6 +429,7 @@ def fetch_openml_fallback_npz(
     spec: DatasetSpec,
     path: Path,
     allow_hf: bool = True,
+    full: bool = False,
 ) -> None:
     """Fallback policy for OpenML-backed specs.
 
@@ -392,18 +446,18 @@ def fetch_openml_fallback_npz(
         return
     if allow_hf and spec.hf_name is not None:
         print(f"OpenML fetch failed for {spec.slug}; falling back to Hugging Face {spec.hf_name}")
-        fetch_hf_npz(spec, path)
+        fetch_hf_npz(spec, path, full=full)
         return
     raise RuntimeError(
         f"OpenML fetch failed for {spec.slug} and no sklearn/Hugging Face fallback is declared"
     )
 
 
-def fetch_hf_npz(spec: DatasetSpec, path: Path) -> None:
+def fetch_hf_npz(spec: DatasetSpec, path: Path, full: bool = False) -> None:
     if spec.hf_kind == "image":
-        fetch_hf_image_npz(spec, path)
+        fetch_hf_image_npz(spec, path, full=full)
     elif spec.hf_kind == "table":
-        fetch_hf_table_npz(spec, path)
+        fetch_hf_table_npz(spec, path, full=full)
     else:
         raise ValueError(f"unknown Hugging Face fallback kind: {spec.hf_kind}")
 
@@ -434,10 +488,11 @@ def image_to_features(image, pool: int = 1) -> np.ndarray:
     return array.reshape(-1)
 
 
-def fetch_hf_image_npz(spec: DatasetSpec, path: Path) -> None:
+def fetch_hf_image_npz(spec: DatasetSpec, path: Path, full: bool = False) -> None:
     from datasets import load_dataset
 
-    dataset = load_dataset(spec.hf_name, split=spec.hf_split)
+    split = spec.hf_full_split if full and spec.hf_full_split is not None else spec.hf_split
+    dataset = load_dataset(spec.hf_name, split=split)
     dataset = maybe_limit_hf_rows(dataset, spec.hf_max_rows)
     images = dataset[spec.hf_image_column]
     labels = dataset[spec.hf_label_column]
@@ -445,11 +500,11 @@ def fetch_hf_image_npz(spec: DatasetSpec, path: Path) -> None:
     save_npz(path, X, np.asarray(labels))
 
 
-def fetch_hf_table_npz(spec: DatasetSpec, path: Path) -> None:
+def fetch_hf_table_npz(spec: DatasetSpec, path: Path, full: bool = False) -> None:
     from datasets import load_dataset
 
     dataset = load_dataset(spec.hf_name, split=spec.hf_split)
-    dataset = maybe_limit_hf_rows(dataset, spec.hf_max_rows)
+    dataset = maybe_limit_hf_rows(dataset, None if full else spec.hf_max_rows)
     if spec.hf_label_column not in dataset.column_names:
         raise ValueError(
             f"label column {spec.hf_label_column!r} not found in {spec.hf_name}; "
@@ -469,17 +524,17 @@ def fetch_sklearn_fallback_npz(spec: DatasetSpec, path: Path) -> None:
     save_npz(path, ds.data, ds.target)
 
 
-def synthetic_blobs_npz(path: Path) -> None:
+def synthetic_blobs_npz(path: Path, n: int = 12000) -> None:
     from benchmark_visuals import gaussian_blobs
 
-    X, y = gaussian_blobs(n=12000, k=8, d=32, spread=0.10, seed=0)
+    X, y = gaussian_blobs(n=n, k=8, d=32, spread=0.10, seed=0)
     save_npz(path, X, y)
 
 
-def synthetic_moons_npz(path: Path) -> None:
+def synthetic_moons_npz(path: Path, n: int = 12000) -> None:
     from sklearn.datasets import make_moons
 
-    X, y = make_moons(n_samples=12000, noise=0.06, random_state=0)
+    X, y = make_moons(n_samples=n, noise=0.06, random_state=0)
     x0 = X[:, 0]
     x1 = X[:, 1]
     X = np.column_stack(
@@ -497,10 +552,10 @@ def synthetic_moons_npz(path: Path) -> None:
     save_npz(path, X, y)
 
 
-def synthetic_circles_npz(path: Path) -> None:
+def synthetic_circles_npz(path: Path, n: int = 12000) -> None:
     from sklearn.datasets import make_circles
 
-    X, y = make_circles(n_samples=12000, noise=0.04, factor=0.42, random_state=0)
+    X, y = make_circles(n_samples=n, noise=0.04, factor=0.42, random_state=0)
     x0 = X[:, 0]
     x1 = X[:, 1]
     radius = np.sqrt(x0 * x0 + x1 * x1)
@@ -577,16 +632,31 @@ def ogb_arxiv_npz(path: Path, cache_root: Path) -> None:
     save_npz(path, graph["node_feat"], labels.reshape(-1))
 
 
-def hf_dbpedia14_npz(path: Path) -> None:
+def synthetic_blobs30k_npz(path: Path) -> None:
+    synthetic_blobs_npz(path, n=30000)
+
+
+def synthetic_moons30k_npz(path: Path) -> None:
+    synthetic_moons_npz(path, n=30000)
+
+
+def synthetic_circles30k_npz(path: Path) -> None:
+    synthetic_circles_npz(path, n=30000)
+
+
+def hf_dbpedia14_npz(path: Path, full: bool = False) -> None:
     from prepare_datasets import dbpedia14
 
-    dbpedia14(str(path))
+    dbpedia14(str(path), per_class=None if full else 3500)
 
 
 LOCAL_LOADERS: dict[str, Callable[[Path], None]] = {
     "synthetic_blobs": synthetic_blobs_npz,
     "synthetic_moons": synthetic_moons_npz,
     "synthetic_circles": synthetic_circles_npz,
+    "synthetic_blobs_30k": synthetic_blobs30k_npz,
+    "synthetic_moons_30k": synthetic_moons30k_npz,
+    "synthetic_circles_30k": synthetic_circles30k_npz,
     "sklearn_digits": sklearn_digits_npz,
     "sklearn_iris": sklearn_iris_npz,
     "sklearn_wine": sklearn_wine_npz,
@@ -601,8 +671,9 @@ def materialize_dataset(
     dataset_dir: Path,
     force: bool,
     prefer_hf: bool,
+    full: bool = False,
 ) -> Path:
-    path = dataset_dir / f"{spec.slug}.npz"
+    path = dataset_cache_path(spec, dataset_dir, full)
     if path.exists() and not force:
         return path
 
@@ -614,14 +685,17 @@ def materialize_dataset(
         elif prefer_hf and spec.hf_name is not None:
             print(f"using Hugging Face mirror for {spec.slug}: {spec.hf_name}")
             try:
-                fetch_hf_npz(spec, path)
+                fetch_hf_npz(spec, path, full=full)
             except Exception:
                 print(f"Hugging Face mirror failed for {spec.slug}; falling back to OpenML")
-                fetch_openml_npz(spec, path, allow_hf_fallback=False)
+                fetch_openml_npz(spec, path, allow_hf_fallback=False, full=full)
         else:
-            fetch_openml_npz(spec, path)
+            fetch_openml_npz(spec, path, full=full)
     elif spec.source in LOCAL_LOADERS:
-        LOCAL_LOADERS[spec.source](path)
+        if spec.source == "hf_dbpedia14":
+            hf_dbpedia14_npz(path, full=full)
+        else:
+            LOCAL_LOADERS[spec.source](path)
     elif spec.source == "pyg_wiki_cs":
         pyg_wiki_cs_npz(path, dataset_dir)
     elif spec.source == "pyg_facebook_page_page":
@@ -633,13 +707,24 @@ def materialize_dataset(
     return path
 
 
+def dataset_cache_path(spec: DatasetSpec, dataset_dir: Path, full: bool = False) -> Path:
+    suffix = "_full" if full else ""
+    return dataset_dir / f"{spec.slug}{suffix}.npz"
+
+
 def parse_dataset_selection(value: str, include_graphs: bool) -> list[str]:
     if value == "smoke":
         slugs = list(SMOKE_DATASETS)
     elif value == "default":
         slugs = list(DEFAULT_DATASETS)
+    elif value == "scale":
+        slugs = list(SCALE_BENCHMARK_DATASETS)
     elif value == "all":
-        slugs = [slug for slug in DATASETS if slug not in GRAPH_DATASETS]
+        slugs = [
+            slug
+            for slug in DATASETS
+            if slug not in GRAPH_DATASETS and slug not in SCALE_DATASETS
+        ]
     elif value == "graphs":
         slugs = list(GRAPH_DATASETS)
     else:
@@ -908,8 +993,9 @@ def list_datasets() -> None:
             source += f":{spec.openml_name}"
         smoke = " smoke" if slug in SMOKE_DATASETS else ""
         default = " default" if slug in DEFAULT_DATASETS else ""
+        scale = " scale" if slug in SCALE_BENCHMARK_DATASETS else ""
         graph = " graph-optional" if slug in GRAPH_DATASETS else ""
-        print(f"{slug:<20} {source:<28} {spec.label}{smoke}{default}{graph}")
+        print(f"{slug:<20} {source:<28} {spec.label}{smoke}{default}{scale}{graph}")
         if spec.note:
             print(f"{'':<50}{spec.note}")
 
@@ -920,7 +1006,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--datasets",
         default="default",
-        help="comma-separated slugs, or one of: smoke, default, all, graphs",
+        help="comma-separated slugs, or one of: smoke, default, scale, all, graphs",
     )
     parser.add_argument("--include-graphs", action="store_true")
     parser.add_argument("--output-dir", default="artifacts/dataset-suite")
@@ -978,6 +1064,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     args.timing_repeats = max(1, int(args.timing_repeats))
+    if args.datasets == "scale":
+        args.full = True
     if args.list_datasets:
         list_datasets()
         return 0
@@ -1008,13 +1096,14 @@ def main() -> int:
         spec = DATASETS[slug]
         try:
             npz_path = (
-                dataset_dir / f"{spec.slug}.npz"
+                dataset_cache_path(spec, dataset_dir, full=args.full)
                 if args.dry_run
                 else materialize_dataset(
                     spec,
                     dataset_dir,
                     force=args.force_fetch,
                     prefer_hf=args.prefer_hf,
+                    full=args.full,
                 )
             )
             command = benchmark_command(spec, npz_path, output_dir, args)

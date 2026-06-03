@@ -26,6 +26,6 @@ RUN python3 -m pip install --upgrade pip \
 COPY . /workspace/dire-evoc
 
 RUN python3 -m pip install -e '.[cluster,docs]' \
-    && python3 -m pip install datasets sentence-transformers pytest hdbscan
+    && python3 -m pip install datasets sentence-transformers pytest hdbscan torch-geometric ogb
 
 CMD ["bash"]
