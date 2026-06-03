@@ -15,10 +15,13 @@ EVoC clustering on a DiRe layout. ARI is against ground-truth labels.
 
 These numbers come from the CUDA Docker repro on an NVIDIA A10 using the Dockerfile in
 this repository: CUDA 12.8 image, RAPIDS 26.2 Python packages. The run completed
-successfully: quickstart, the 13-dataset default suite, corrected CIFAR-10 rerun,
-summary regeneration, and artifact download all returned exit code 0. The local artifact
-trees are `artifacts/cuda-timing-repeats-default/` and the merged
-`artifacts/cuda-timing-repeats-combined/`.
+successfully: quickstart, the 13-row original default suite, corrected CIFAR-10 rerun,
+summary regeneration, the 5-dataset OpenML-extra suite, and artifact download all
+returned exit code 0. The local artifact trees are
+`artifacts/cuda-timing-repeats-default/`,
+`artifacts/cuda-timing-repeats-openml-extra/`, and the merged
+`artifacts/cuda-timing-repeats-combined/`. The regenerated default figures append the
+OpenML-extra rows, so they summarize 18 datasets.
 
 This run uses matched EVoC controls for both methods. The dataset suite chooses
 `base_min_cluster_size` case-by-case, and uses `base_n_clusters=2` for the synthetic
@@ -43,6 +46,11 @@ Operational auto ARI vs ground truth:
 | Olivetti faces | 320 | 4,096 | 40 | 0.022 | 0.063 | -0.041 | DiRe 0.014 vs 0.056 |
 | Forest CoverType | 40,000 | 54 | 7 | 0.016 | -0.026 | +0.042 | DiRe 0.006 vs -0.033 |
 | CIFAR-10 | 24,000 | 768 | 10 | 0.029 | 0.012 | +0.017 | DiRe 0.004 vs 0.002 |
+| OptDigits | 4,496 | 64 | 10 | 0.848 | 0.147 | +0.701 | DiRe 0.840 vs 0.918 |
+| PenDigits | 8,794 | 16 | 10 | 0.738 | 0.125 | +0.613 | DiRe 0.800 vs 0.762 |
+| SatImage | 5,144 | 36 | 6 | 0.495 | 0.507 | -0.012 | DiRe 0.559 vs 0.507 |
+| Image Segmentation | 1,848 | 19 | 7 | 0.179 | 0.135 | +0.044 | DiRe 0.547 vs 0.321 |
+| Vehicle | 677 | 18 | 4 | 0.064 | 0.077 | -0.013 | DiRe 0.130 vs 0.103 |
 
 The code default is OpenML first, then fallback. The recorded remote artifact was rerun
 with the declared Hugging Face mirror option for MNIST, Fashion-MNIST, and CIFAR-10 after
@@ -70,6 +78,11 @@ Timing from the same CUDA run:
 | Olivetti faces | 0.56s | 0.19s | 0.89s | 0.20s | 5.21 | min_samples=10, base_min_cluster_size=2 |
 | Forest CoverType | 15.84s | 0.47s | 16.21s | 0.48s | 3.04 | min_samples=10, base_min_cluster_size=100 |
 | CIFAR-10 | 14.87s | 0.60s | 15.30s | 1.51s | 26.39 | min_samples=10, base_min_cluster_size=100 |
+| OptDigits | 6.00s | 0.11s | 6.31s | 0.68s | 10.19 | min_samples=10, base_min_cluster_size=5 |
+| PenDigits | 12.29s | 0.15s | 12.62s | 0.15s | 6.27 | min_samples=10, base_min_cluster_size=5 |
+| SatImage | 6.58s | 0.11s | 6.89s | 0.12s | 13.70 | min_samples=10, base_min_cluster_size=5 |
+| Image Segmentation | 0.57s | 0.08s | 0.91s | 0.09s | 2.20 | min_samples=10, base_min_cluster_size=5 |
+| Vehicle | 0.25s | 0.06s | 0.59s | 0.07s | 5.78 | min_samples=10, base_min_cluster_size=5 |
 
 ![CUDA fit runtime ratio](_static/benchmark_fit_ratio.svg)
 
@@ -165,25 +178,26 @@ initial selected layer is mostly noise; the selected values are recorded in
 This run supports a narrower claim than the old README:
 
 - Wins are dataset-dependent. DiReEVoC wins on iris, wine, breast cancer, Fashion-MNIST,
-  CoverType, and pooled CIFAR-10; ties on moons and circles under the matched feasible
-  controls; and loses on blobs, MNIST, DBpedia-14, digits, and Olivetti in the auto
-  metric.
+  CoverType, pooled CIFAR-10, OptDigits, PenDigits, and Image Segmentation; ties on
+  moons and circles under the matched feasible controls; and loses on blobs, MNIST,
+  DBpedia-14, sklearn digits, Olivetti, SatImage, and Vehicle in the auto metric.
 - Fixed-k can disagree with auto. Several datasets have good fixed-k substrate scores but
   poor selected layers, so fixed-k and oracle numbers must not hide selector failures.
-- Tiny data and weak image features are poor regimes. Olivetti, CIFAR-10, and CoverType
-  are not strong quality wins in absolute ARI.
+- Tiny data and weak image/tabular features are poor regimes. Olivetti, CIFAR-10,
+  CoverType, Segment, and Vehicle are not strong quality wins in absolute ARI.
 - DiRe layout construction dominates end-to-end time except where pure EVoC itself is
   slow.
 
 ## Compared with `master`
 
-The `master` README was too broad. The CUDA repro now runs 13 datasets by default and
-records all per-dataset figures plus warm-run timing fields. Fashion-MNIST remains a
-DiReEVoC win (`0.440 vs 0.390`), moons and circles are feasible ties when both methods
-use the known two-cluster base target, but DBpedia-14 still slightly favors pure EVoC in
-this 39.2k run (`0.607 vs 0.623`). MNIST also favors pure EVoC (`0.720 vs 0.813`).
-Historical 20 Newsgroups and arXiv claims are not part of the default repro unless their
-loaders are enabled explicitly.
+The `master` README was too broad. The CUDA repro now records 18 default-suite datasets
+plus warm-run timing fields. Fashion-MNIST remains a DiReEVoC win (`0.440 vs 0.390`),
+OptDigits and PenDigits are strong DiReEVoC auto wins (`0.848 vs 0.147` and
+`0.738 vs 0.125`), moons and circles are feasible ties when both methods use the known
+two-cluster base target, but DBpedia-14 still slightly favors pure EVoC in this 39.2k
+run (`0.607 vs 0.623`). MNIST also favors pure EVoC (`0.720 vs 0.813`). Historical 20
+Newsgroups and arXiv claims are not part of the default repro unless their loaders are
+enabled explicitly.
 
 ## Reproduce
 
@@ -200,7 +214,8 @@ artifacts to `artifacts/cuda/`.
 The dataset suite can also be run directly. Use `smoke` for only synthetic blobs, moons,
 and circles, and use `default` for the larger reproducibility suite that includes those
 same three synthetic datasets plus MNIST, Fashion-MNIST, DBpedia-14, CoverType, CIFAR-10,
-and the smaller sklearn/Olivetti datasets:
+OptDigits, PenDigits, SatImage, Image Segmentation, Vehicle, and the smaller
+sklearn/Olivetti datasets:
 
 ```bash
 python examples/benchmark_dataset_suite.py --datasets smoke \
@@ -216,6 +231,19 @@ README/Sphinx figures from existing artifacts with:
 
 ```bash
 python scripts/plot_benchmark_metrics.py
+```
+
+When `artifacts/cuda-timing-repeats-openml-extra/` exists, the plotting script appends
+those five OpenML rows to the default-suite figures and combined bundle. The extra rows
+can also be reproduced directly:
+
+```bash
+python examples/benchmark_dataset_suite.py \
+  --datasets optdigits,pendigits,satimage,segment,vehicle \
+  --output-dir artifacts/openml-extra \
+  --test-fraction 0.2 \
+  --timing-repeats 20 \
+  --continue-on-error
 ```
 
 The default DiRe layout dimension is `n_components=8`. To test whether `4` is good

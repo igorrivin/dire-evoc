@@ -75,9 +75,10 @@ structure is present and the DiRe layout is a better clustering substrate than t
 vectors. The table below is from the checked CUDA Docker repro on an NVIDIA A10, using
 the same dataset-specific EVoC `base_min_cluster_size` and `base_n_clusters` controls
 for DiReEVoC and pure EVoC; see `docs/benchmarks.md` and the local
-`artifacts/cuda-timing-repeats-default/` artifact tree. Timings are 20-run warm means
-with the first run discarded; first-run and first-included means are recorded separately
-in the metrics and alternate runtime figures.
+`artifacts/cuda-timing-repeats-default/` plus
+`artifacts/cuda-timing-repeats-openml-extra/` artifact trees. Timings are 20-run warm
+means with the first run discarded; first-run and first-included means are recorded
+separately in the metrics and alternate runtime figures.
 
 ![CUDA auto ARI comparison](docs/_static/benchmark_auto_ari.svg)
 
@@ -100,6 +101,11 @@ in the metrics and alternate runtime figures.
 | Olivetti faces | 0.022 | 0.063 | Tiny data; both poor |
 | Forest CoverType | 0.016 | -0.026 | DiReEVoC slight win; both poor |
 | CIFAR-10 | 0.029 | 0.012 | 30k images, average-pooled to 16x16 RGB (`d=768`) |
+| OptDigits | 0.848 | 0.147 | DiReEVoC strong auto win; pure EVoC stronger at fixed-k |
+| PenDigits | 0.738 | 0.125 | DiReEVoC strong auto win |
+| SatImage | 0.495 | 0.507 | Pure EVoC slight auto win; DiReEVoC stronger at fixed-k |
+| Image Segmentation | 0.179 | 0.135 | DiReEVoC modest auto win; much stronger at fixed-k |
+| Vehicle | 0.064 | 0.077 | Tiny tabular data; both poor |
 
 Runtime from the same CUDA run:
 
@@ -118,6 +124,11 @@ Runtime from the same CUDA run:
 | Olivetti faces | 0.56s | 0.19s |
 | Forest CoverType | 15.84s | 0.47s |
 | CIFAR-10 | 14.87s | 0.60s |
+| OptDigits | 6.00s | 0.11s |
+| PenDigits | 12.29s | 0.15s |
+| SatImage | 6.58s | 0.11s |
+| Image Segmentation | 0.57s | 0.08s |
+| Vehicle | 0.25s | 0.06s |
 
 ![CUDA fit runtime ratio](docs/_static/benchmark_fit_ratio.svg)
 
@@ -149,8 +160,8 @@ The honest boundary:
 - DiRe is data-hungry; tiny datasets and weak feature representations are poor fits.
 - Layer selection is still a real failure mode. The tuned run makes moons/circles
   feasible by setting the known two-cluster base layer for both methods, but MNIST,
-  digits, Fashion-MNIST, DBpedia, Olivetti, and CoverType still expose selector and
-  substrate limits.
+  digits, Fashion-MNIST, DBpedia, Olivetti, CoverType, SatImage, Segment, and Vehicle
+  still expose selector and substrate limits.
 - A hard partition is often the wrong object on continuous manifolds. In that case,
   inspect the layout and intrinsic dimension before trusting cluster labels.
 - The GPU Phase-2 speedup is regime-dependent. It helps at large `n` and low CPU core
@@ -217,8 +228,9 @@ python examples/benchmark_dataset_suite.py --datasets default \
 The `smoke` preset is only synthetic blobs, moons, and circles. The `default` suite keeps
 those same three synthetic examples at the front of the larger reproducibility run, then
 adds sklearn digits, iris, wine, breast cancer, MNIST, Fashion-MNIST, DBpedia-14
-embeddings, Olivetti faces, Forest CoverType, and CIFAR-10. CIFAR-10 is average-pooled to
-16x16 RGB features for this benchmark so it stays on the DiRe cuVS kNN path. Timing
+embeddings, Olivetti faces, Forest CoverType, CIFAR-10, OptDigits, PenDigits, SatImage,
+Image Segmentation, and Vehicle. CIFAR-10 is average-pooled to 16x16 RGB features for
+this benchmark so it stays on the DiRe cuVS kNN path. Timing
 summaries use warm means in `fit_seconds` by default, while `fit_seconds_first`,
 `fit_seconds_mean_all`, and `fit_seconds_warm_mean` are also written. Rebuild the
 README/Sphinx figures from local artifacts with `python scripts/plot_benchmark_metrics.py`.
@@ -226,8 +238,7 @@ OpenML is tried first by default. If OpenML fails, datasets that
 are fully available in sklearn use the sklearn fallback first, as Forest CoverType does
 through `fetch_covtype`; other mirrored OpenML datasets fall back to Hugging Face
 (`ylecun/mnist`, `zalando-datasets/fashion_mnist`, or `uoft-cs/cifar10`).
-OpenML-only datasets such as USPS, SVHN, UMIST faces, Letter,
-OptDigits, PenDigits, SatImage, Segment, and Vehicle remain available by explicit slug.
+USPS, SVHN, UMIST faces, and Letter remain available by explicit slug.
 Optional graph-feature datasets include Wiki-CS and OGBN-Arxiv when their extra loaders
 are installed.
 

@@ -33,6 +33,7 @@ from benchmark_dataset_suite import timing_title
 DEFAULT_ARTIFACTS = ROOT / "artifacts" / "cuda-timing-repeats-default"
 SMOKE_ARTIFACTS = ROOT / "artifacts" / "cuda-timing-repeats-smoke"
 COMBINED_ARTIFACTS = ROOT / "artifacts" / "cuda-timing-repeats-combined"
+OPENML_EXTRA_ARTIFACTS = ROOT / "artifacts" / "cuda-timing-repeats-openml-extra"
 SCALE_ARTIFACTS = ROOT / "artifacts" / "cuda-scale"
 DOCS_STATIC = ROOT / "docs" / "_static"
 
@@ -68,6 +69,24 @@ def write_artifact_summary(rows: list[dict], artifact_dir: Path, timing_primary:
     write_summary_csv(rows, artifact_dir / "suite_metrics.csv")
     plot_suite_summary(rows, artifact_dir, timing_primary)
     normalize_svg_outputs(artifact_dir.glob("suite_*.svg"))
+
+
+def append_extra_rows(
+    rows: list[dict],
+    extra_artifact_dirs: Iterable[Path],
+    timing_primary: str,
+) -> list[dict]:
+    merged = list(rows)
+    seen = {row["slug"] for row in merged}
+    for artifact_dir in extra_artifact_dirs:
+        if not artifact_dir.exists():
+            continue
+        for row in load_suite_rows(artifact_dir, timing_primary):
+            if row["slug"] in seen:
+                continue
+            merged.append(row)
+            seen.add(row["slug"])
+    return merged
 
 
 def prefixed_rows(source: str, rows: Iterable[dict]) -> list[dict]:
@@ -327,6 +346,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--default-artifacts", type=Path, default=DEFAULT_ARTIFACTS)
     parser.add_argument("--smoke-artifacts", type=Path, default=SMOKE_ARTIFACTS)
     parser.add_argument("--combined-artifacts", type=Path, default=COMBINED_ARTIFACTS)
+    parser.add_argument(
+        "--default-extra-artifacts",
+        type=Path,
+        action="append",
+        default=[OPENML_EXTRA_ARTIFACTS],
+        help="optional artifact tree(s) appended to the default benchmark figures",
+    )
     parser.add_argument("--scale-artifacts", type=Path, default=SCALE_ARTIFACTS)
     parser.add_argument("--docs-static", type=Path, default=DOCS_STATIC)
     parser.add_argument(
@@ -351,6 +377,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     default_rows = load_suite_rows(args.default_artifacts, args.timing_primary)
+    default_rows = append_extra_rows(
+        default_rows,
+        args.default_extra_artifacts,
+        args.timing_primary,
+    )
     write_artifact_summary(default_rows, args.default_artifacts, args.timing_primary)
     grouped_ari_bar(
         default_rows,
@@ -418,6 +449,9 @@ def main() -> int:
                 "default_rows": len(default_rows),
                 "combined_rows": len(combined_rows),
                 "scale_rows": len(scale_rows),
+                "default_extra_artifacts": [
+                    str(path) for path in args.default_extra_artifacts if path.exists()
+                ],
                 "docs_static": str(args.docs_static),
             },
             indent=2,

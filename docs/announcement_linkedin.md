@@ -6,7 +6,7 @@ Kolpakov). The idea is simple — use a DiRe layout as the *substrate* that EVō
 and add the pieces that only make sense at the intersection.
 
 **What you get:**
-🔹 *A broader CUDA repro, not just a cherry-picked table.* The default run now covers 13
+🔹 *A broader CUDA repro, not just a cherry-picked table.* The default run now covers 18
 datasets, writes per-dataset SVG/JSON/CSV artifacts, uses matched EVoC base controls for
 DiRe→EVōC and pure EVōC, and records 20-run warm-primary timings plus first-run and
 first-included fields.
@@ -15,7 +15,9 @@ full MNIST/Fashion-MNIST/CIFAR-10, full DBpedia-14 embeddings, Forest CoverType,
 and OGBN-Arxiv.
 DiRe→EVōC wins Fashion-MNIST (**0.440 vs 0.390**), breast cancer (**0.404 vs 0.116**),
 iris (**0.562 vs 0.236**), wine (**0.465 vs 0.121**), and pooled CIFAR-10
-(**0.029 vs 0.012**); moons/circles are feasible ties when both methods use
+(**0.029 vs 0.012**). The newly added OpenML rows include strong DiRe→EVōC auto wins on
+OptDigits (**0.848 vs 0.147**) and PenDigits (**0.738 vs 0.125**); moons/circles are
+feasible ties when both methods use
 `base_n_clusters=2` (**1.000 vs 1.000**); pure EVōC wins MNIST (**0.720 vs 0.813**) and
 slightly wins DBpedia-14 (**0.607 vs 0.623**).
 🔹 *Intrinsic dimension, essentially free* — read straight off the k-NN graph DiRe already

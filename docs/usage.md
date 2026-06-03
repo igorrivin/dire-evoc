@@ -77,7 +77,7 @@ condense/persistence/layer post-process. If EVoC exposes
 `build_cluster_layers(..., precomputed_linkage=slt)`, that seam is used; otherwise
 `dire-evoc` calls EVoC's tree utilities directly. On the CUDA benchmark run, the
 EVoC-on-layout phase is usually small relative to DiRe layout construction, though the
-full 13-dataset repro shows that timings are strongly dataset- and backend-dependent.
+full 18-dataset repro shows that timings are strongly dataset- and backend-dependent.
 
 ## 4. Out-of-sample assignment — `predict`
 
@@ -106,8 +106,9 @@ python examples/benchmark_dataset_suite.py --datasets scale \
 
 The `smoke` preset runs only synthetic blobs, moons, and circles. The default suite keeps
 those same synthetic cases and adds sklearn digits/iris/wine/breast-cancer/Olivetti,
-MNIST, Fashion-MNIST, DBpedia-14, Forest CoverType, and CIFAR-10. CIFAR-10 is pooled to
-16x16 RGB features for the benchmark so it stays on the DiRe cuVS kNN path. OpenML is
+MNIST, Fashion-MNIST, DBpedia-14, Forest CoverType, CIFAR-10, OptDigits, PenDigits,
+SatImage, Image Segmentation, and Vehicle. CIFAR-10 is pooled to 16x16 RGB features for
+the benchmark so it stays on the DiRe cuVS kNN path. OpenML is
 tried first by default; sklearn-native OpenML datasets use sklearn as fallback, and other
 mirrored OpenML datasets use Hugging Face as fallback. Dataset-specific defaults keep
 `base_min_cluster_size` matched between DiReEVoC and pure EVoC; moons and circles also

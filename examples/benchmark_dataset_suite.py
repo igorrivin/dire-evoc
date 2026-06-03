@@ -326,6 +326,11 @@ DEFAULT_DATASETS = (
     "olivetti_faces",
     "covertype",
     "cifar10",
+    "optdigits",
+    "pendigits",
+    "satimage",
+    "segment",
+    "vehicle",
 )
 GRAPH_DATASETS = ("wiki_cs", "ogbn_arxiv")
 SCALE_BENCHMARK_DATASETS = (

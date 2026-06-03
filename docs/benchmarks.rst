@@ -114,6 +114,36 @@ run discarded, and first-run and first-included means are recorded separately.
      - 0.029
      - 0.012
      - DiReEVoC slight win; both poor
+   * - OptDigits
+     - 4,496
+     - 64
+     - 0.848
+     - 0.147
+     - DiReEVoC strong auto win
+   * - PenDigits
+     - 8,794
+     - 16
+     - 0.738
+     - 0.125
+     - DiReEVoC strong auto win
+   * - SatImage
+     - 5,144
+     - 36
+     - 0.495
+     - 0.507
+     - Pure EVoC slight auto win
+   * - Image Segmentation
+     - 1,848
+     - 19
+     - 0.179
+     - 0.135
+     - DiReEVoC modest auto win
+   * - Vehicle
+     - 677
+     - 18
+     - 0.064
+     - 0.077
+     - Tiny-data weak result
 
 The fixed-k substrate comparison removes layer-selection and peak-granularity effects:
 
@@ -207,6 +237,31 @@ The same CUDA run records fit timings for every dataset:
      - 0.60s
      - 15.30s
      - 1.51s
+   * - OptDigits
+     - 6.00s
+     - 0.11s
+     - 6.31s
+     - 0.68s
+   * - PenDigits
+     - 12.29s
+     - 0.15s
+     - 12.62s
+     - 0.15s
+   * - SatImage
+     - 6.58s
+     - 0.11s
+     - 6.89s
+     - 0.12s
+   * - Image Segmentation
+     - 0.57s
+     - 0.08s
+     - 0.91s
+     - 0.09s
+   * - Vehicle
+     - 0.25s
+     - 0.06s
+     - 0.59s
+     - 0.07s
 
 The smoke-only synthetic run and the default run are also merged into one local bundle:
 ``artifacts/cuda-timing-repeats-combined/``.
@@ -359,11 +414,12 @@ The practical map is:
 Compared with ``master``
 ------------------------
 
-The old README was too broad. The CUDA repro now runs 13 datasets by default and records
-all per-dataset figures plus warm-run timing fields. Fashion-MNIST remains a DiReEVoC win
-(``0.440`` vs ``0.390``), moons and circles are perfect ties under matched
-``base_n_clusters=2`` controls, but DBpedia-14 still slightly favors pure EVoC in this
-39.2k run (``0.607`` vs ``0.623``). MNIST also favors pure EVoC (``0.720`` vs
+The old README was too broad. The CUDA repro now records 18 default-suite datasets plus
+warm-run timing fields. Fashion-MNIST remains a DiReEVoC win (``0.440`` vs ``0.390``),
+OptDigits and PenDigits are strong DiReEVoC auto wins (``0.848`` vs ``0.147`` and
+``0.738`` vs ``0.125``), and moons and circles are perfect ties under matched
+``base_n_clusters=2`` controls. DBpedia-14 still slightly favors pure EVoC in this 39.2k
+run (``0.607`` vs ``0.623``), and MNIST also favors pure EVoC (``0.720`` vs
 ``0.813``). Historical 20 Newsgroups and arXiv claims are not part of the default repro
 unless their loaders are enabled explicitly.
 
@@ -384,7 +440,8 @@ The wrapper syncs the working tree to the host, builds the Docker image, runs
 The dataset suite can also be run directly. Use ``smoke`` for only synthetic blobs,
 moons, and circles, and use ``default`` for the larger reproducibility suite that keeps
 those same three synthetic datasets and then adds MNIST, Fashion-MNIST, DBpedia-14,
-CoverType, CIFAR-10, and the smaller sklearn/Olivetti datasets:
+CoverType, CIFAR-10, OptDigits, PenDigits, SatImage, Image Segmentation, Vehicle, and
+the smaller sklearn/Olivetti datasets:
 
 .. code-block:: bash
 
@@ -401,6 +458,19 @@ the README/Sphinx figures from existing artifacts with:
 .. code-block:: bash
 
    python scripts/plot_benchmark_metrics.py
+
+When ``artifacts/cuda-timing-repeats-openml-extra/`` exists, the plotting script appends
+those five OpenML rows to the default-suite figures and combined bundle. The extra rows
+can also be reproduced directly:
+
+.. code-block:: bash
+
+   python examples/benchmark_dataset_suite.py \
+      --datasets optdigits,pendigits,satimage,segment,vehicle \
+      --output-dir artifacts/openml-extra \
+      --test-fraction 0.2 \
+      --timing-repeats 20 \
+      --continue-on-error
 
 For the one-run scale preset:
 
