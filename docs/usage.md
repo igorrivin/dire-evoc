@@ -109,4 +109,5 @@ tried first by default; sklearn-native OpenML datasets use sklearn as fallback, 
 mirrored OpenML datasets use Hugging Face as fallback. Dataset-specific defaults keep
 `base_min_cluster_size` matched between DiReEVoC and pure EVoC; moons and circles also
 use `base_n_clusters=2` because their feasible benchmark target is known. Repeated
-timings include the first run in `fit_seconds` and also write warm-only means.
+timings use warm means in `fit_seconds` by default, while first-run, mean-all, and
+warm-only summaries are written separately.

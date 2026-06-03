@@ -75,8 +75,9 @@ structure is present and the DiRe layout is a better clustering substrate than t
 vectors. The table below is from the checked CUDA Docker repro on an NVIDIA A10, using
 the same dataset-specific EVoC `base_min_cluster_size` and `base_n_clusters` controls
 for DiReEVoC and pure EVoC; see `docs/benchmarks.md` and the local
-`artifacts/cuda-timing-repeats-default/` artifact tree. Timings are 20-run means with
-the first run included; warm-only means are also recorded in the metrics.
+`artifacts/cuda-timing-repeats-default/` artifact tree. Timings are 20-run warm means
+with the first run discarded; first-run and first-included means are recorded separately
+in the metrics and alternate runtime figures.
 
 ![CUDA auto ARI comparison](docs/_static/benchmark_auto_ari.svg)
 
@@ -104,19 +105,19 @@ Runtime from the same CUDA run:
 
 | Dataset | DiReEVoC fit | Pure EVoC fit |
 | --- | ---: | ---: |
-| Synthetic blobs 12k | 3.43s | 0.73s |
-| Synthetic moons 12k | 1.65s | 0.15s |
-| Synthetic circles 12k | 1.67s | 0.15s |
-| MNIST | 20.75s | 1.17s |
-| sklearn digits | 3.08s | 0.08s |
-| sklearn iris | 0.51s | 0.06s |
-| sklearn wine | 0.57s | 0.06s |
-| sklearn breast cancer | 0.96s | 0.06s |
-| Fashion-MNIST | 23.33s | 0.63s |
-| DBpedia-14 BGE-small | 15.83s | 0.65s |
-| Olivetti faces | 0.89s | 0.20s |
-| Forest CoverType | 16.21s | 0.48s |
-| CIFAR-10 | 15.30s | 1.51s |
+| Synthetic blobs 12k | 3.03s | 0.15s |
+| Synthetic moons 12k | 1.43s | 0.15s |
+| Synthetic circles 12k | 1.44s | 0.15s |
+| MNIST | 20.37s | 0.59s |
+| sklearn digits | 2.71s | 0.07s |
+| sklearn iris | 0.20s | 0.06s |
+| sklearn wine | 0.21s | 0.06s |
+| sklearn breast cancer | 0.62s | 0.06s |
+| Fashion-MNIST | 23.13s | 0.62s |
+| DBpedia-14 BGE-small | 15.45s | 0.65s |
+| Olivetti faces | 0.56s | 0.19s |
+| Forest CoverType | 15.84s | 0.47s |
+| CIFAR-10 | 14.87s | 0.60s |
 
 ![CUDA fit runtime ratio](docs/_static/benchmark_fit_ratio.svg)
 
@@ -196,8 +197,10 @@ those same three synthetic examples at the front of the larger reproducibility r
 adds sklearn digits, iris, wine, breast cancer, MNIST, Fashion-MNIST, DBpedia-14
 embeddings, Olivetti faces, Forest CoverType, and CIFAR-10. CIFAR-10 is average-pooled to
 16x16 RGB features for this benchmark so it stays on the DiRe cuVS kNN path. Timing
-summaries include the first run in `fit_seconds` and also write warm-only means such as
-`fit_seconds_warm_mean`. OpenML is tried first by default. If OpenML fails, datasets that
+summaries use warm means in `fit_seconds` by default, while `fit_seconds_first`,
+`fit_seconds_mean_all`, and `fit_seconds_warm_mean` are also written. Rebuild the
+README/Sphinx figures from local artifacts with `python scripts/plot_benchmark_metrics.py`.
+OpenML is tried first by default. If OpenML fails, datasets that
 are fully available in sklearn use the sklearn fallback first, as Forest CoverType does
 through `fetch_covtype`; other mirrored OpenML datasets fall back to Hugging Face
 (`ylecun/mnist`, `zalando-datasets/fashion_mnist`, or `uoft-cs/cifar10`).

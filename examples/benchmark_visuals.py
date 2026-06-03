@@ -146,6 +146,20 @@ def summarize_timing_dicts(timing_dicts):
     }
 
 
+def timing_policy(args):
+    if max(1, int(getattr(args, "timing_repeats", 1))) == 1:
+        return "single_run"
+    if getattr(args, "timing_primary", "warm_mean") == "mean_all":
+        return "mean_all_first_included"
+    return "warm_mean_first_discarded"
+
+
+def timing_primary_value(stats, args):
+    if getattr(args, "timing_primary", "warm_mean") == "mean_all":
+        return stats["mean_all"]
+    return stats["mean_warm"]
+
+
 def cluster_count(labels):
     labels = np.asarray(labels)
     return int(np.unique(labels[labels >= 0]).size)
@@ -205,14 +219,17 @@ def fit_vanilla_evoc(X, y, args):
         args.timing_repeats,
     )
     result = evaluate_auto_oracle(ev.labels_, ev.cluster_layers_, y)
-    result["fit_seconds"] = fit_stats["mean_all"]
-    result["total_seconds"] = fit_stats["mean_all"]
+    result["fit_seconds"] = timing_primary_value(fit_stats, args)
+    result["total_seconds"] = timing_primary_value(fit_stats, args)
+    result["fit_seconds_mean_all"] = fit_stats["mean_all"]
+    result["total_seconds_mean_all"] = fit_stats["mean_all"]
     result["fit_seconds_first"] = fit_stats["first"]
     result["fit_seconds_warm_mean"] = fit_stats["mean_warm"]
     result["total_seconds_first"] = fit_stats["first"]
     result["total_seconds_warm_mean"] = fit_stats["mean_warm"]
     result["timing_repeats"] = fit_stats["repeats"]
-    result["timing_policy"] = "mean_all_first_included"
+    result["timing_primary"] = args.timing_primary
+    result["timing_policy"] = timing_policy(args)
     result["timing_stats"] = {"fit_seconds": fit_stats, "total_seconds": fit_stats}
     return ev, result
 
@@ -373,6 +390,7 @@ def fit_dire_evoc_profile(X_train, y_train, X_test, y_test, args):
 
     if repeats == 1:
         first_result["timing_repeats"] = 1
+        first_result["timing_primary"] = args.timing_primary
         first_result["timing_policy"] = "single_run"
         first_result["fit_seconds_first"] = first_result["fit_seconds"]
         first_result["fit_seconds_warm_mean"] = first_result["fit_seconds"]
@@ -393,21 +411,31 @@ def fit_dire_evoc_profile(X_train, y_train, X_test, y_test, args):
         [result["timings"] for result in repeated_results]
     )
     first_result["timings_first"] = first_result["timings"]
-    first_result["timings"] = {
+    first_result["timings_mean_all"] = {
         key: value["mean_all"] for key, value in phase_stats.items()
+    }
+    first_result["timings_warm_mean"] = {
+        key: value["mean_warm"] for key, value in phase_stats.items()
+    }
+    phase_primary_key = "mean_all" if args.timing_primary == "mean_all" else "mean_warm"
+    first_result["timings"] = {
+        key: value[phase_primary_key] for key, value in phase_stats.items()
     }
     for key, value in first_result["timings_first"].items():
         if not isinstance(value, (float, int, np.floating, np.integer)):
             first_result["timings"][key] = value
 
-    first_result["fit_seconds"] = fit_stats["mean_all"]
-    first_result["total_seconds"] = total_stats["mean_all"]
+    first_result["fit_seconds"] = timing_primary_value(fit_stats, args)
+    first_result["total_seconds"] = timing_primary_value(total_stats, args)
+    first_result["fit_seconds_mean_all"] = fit_stats["mean_all"]
+    first_result["total_seconds_mean_all"] = total_stats["mean_all"]
     first_result["fit_seconds_first"] = fit_stats["first"]
     first_result["fit_seconds_warm_mean"] = fit_stats["mean_warm"]
     first_result["total_seconds_first"] = total_stats["first"]
     first_result["total_seconds_warm_mean"] = total_stats["mean_warm"]
     first_result["timing_repeats"] = repeats
-    first_result["timing_policy"] = "mean_all_first_included"
+    first_result["timing_primary"] = args.timing_primary
+    first_result["timing_policy"] = timing_policy(args)
     first_result["timing_stats"] = {
         "fit_seconds": fit_stats,
         "total_seconds": total_stats,
@@ -445,7 +473,8 @@ def compute_fixed_k(X_train, y_train, layout, n_classes, args):
             "fixed_k_nmi": float(normalized_mutual_info_score(y_train, ev_fixed)),
             "fixed_k_clusters": cluster_count(ev_fixed),
             "fixed_k_noise_fraction": noise_fraction(ev_fixed),
-            "fixed_k_seconds": ev_stats["mean_all"],
+            "fixed_k_seconds": timing_primary_value(ev_stats, args),
+            "fixed_k_seconds_mean_all": ev_stats["mean_all"],
             "fixed_k_seconds_first": ev_stats["first"],
             "fixed_k_seconds_warm_mean": ev_stats["mean_warm"],
             "fixed_k_timing_stats": ev_stats,
@@ -455,7 +484,8 @@ def compute_fixed_k(X_train, y_train, layout, n_classes, args):
             "fixed_k_nmi": float(normalized_mutual_info_score(y_train, de_fixed)),
             "fixed_k_clusters": cluster_count(de_fixed),
             "fixed_k_noise_fraction": noise_fraction(de_fixed),
-            "fixed_k_seconds": de_stats["mean_all"],
+            "fixed_k_seconds": timing_primary_value(de_stats, args),
+            "fixed_k_seconds_mean_all": de_stats["mean_all"],
             "fixed_k_seconds_first": de_stats["first"],
             "fixed_k_seconds_warm_mean": de_stats["mean_warm"],
             "fixed_k_timing_stats": de_stats,
@@ -683,9 +713,15 @@ def parse_args():
         type=int,
         default=1,
         help=(
-            "repeat timed fits this many times; metrics report mean_all with the first "
-            "run included plus first-run and warm-only summaries"
+            "repeat timed fits this many times; fit_seconds follows --timing-primary "
+            "and metrics also record first-run, mean-all, and warm-only summaries"
         ),
+    )
+    p.add_argument(
+        "--timing-primary",
+        default="warm_mean",
+        choices=["warm_mean", "mean_all"],
+        help="which repeated timing summary is reported as fit_seconds",
     )
     p.add_argument("--use-gpu", default="auto", choices=["auto", "true", "false"])
     p.add_argument(
@@ -759,7 +795,8 @@ def main():
             if args.base_n_clusters is None
             else int(args.base_n_clusters),
             "timing_repeats": int(args.timing_repeats),
-            "timing_policy": "mean_all_first_included",
+            "timing_primary": args.timing_primary,
+            "timing_policy": timing_policy(args),
         },
         "vanilla_evoc": vanilla,
         "dire_evoc": dire,

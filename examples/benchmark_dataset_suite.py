@@ -698,6 +698,8 @@ def benchmark_command(spec: DatasetSpec, npz_path: Path, output_dir: Path, args)
         str(args.max_iter_layout),
         "--timing-repeats",
         str(args.timing_repeats),
+        "--timing-primary",
+        args.timing_primary,
         "--use-gpu",
         args.use_gpu,
         "--selector",
@@ -732,7 +734,17 @@ def run_command(name: str, command: list[str], log_dir: Path) -> dict:
     }
 
 
-def metrics_row(slug: str, metrics: dict) -> dict:
+def metric_seconds(section: dict, key: str, timing_primary: str):
+    warm_key = f"{key}_warm_mean"
+    mean_all_key = f"{key}_mean_all"
+    if timing_primary == "warm_mean" and section.get(warm_key) is not None:
+        return section[warm_key]
+    if timing_primary == "mean_all":
+        return section.get(mean_all_key, section[key])
+    return section[key]
+
+
+def metrics_row(slug: str, metrics: dict, timing_primary: str) -> dict:
     dire = metrics["dire_evoc"]
     pure = metrics["vanilla_evoc"]
     return {
@@ -751,13 +763,21 @@ def metrics_row(slug: str, metrics: dict) -> dict:
         "pure_oracle_ari": pure["oracle_ari"],
         "dire_fixed_k_ari": dire.get("fixed_k_ari"),
         "pure_fixed_k_ari": pure.get("fixed_k_ari"),
-        "dire_fit_seconds": dire["fit_seconds"],
-        "pure_fit_seconds": pure["fit_seconds"],
+        "dire_fit_seconds": metric_seconds(dire, "fit_seconds", timing_primary),
+        "pure_fit_seconds": metric_seconds(pure, "fit_seconds", timing_primary),
+        "dire_fit_seconds_mean_all": dire.get("fit_seconds_mean_all", dire["fit_seconds"]),
+        "pure_fit_seconds_mean_all": pure.get("fit_seconds_mean_all", pure["fit_seconds"]),
         "dire_fit_seconds_first": dire.get("fit_seconds_first"),
         "pure_fit_seconds_first": pure.get("fit_seconds_first"),
         "dire_fit_seconds_warm_mean": dire.get("fit_seconds_warm_mean"),
         "pure_fit_seconds_warm_mean": pure.get("fit_seconds_warm_mean"),
         "timing_repeats": metrics["data"].get("timing_repeats", 1),
+        "timing_primary": timing_primary,
+        "timing_policy": (
+            "mean_all_first_included"
+            if timing_primary == "mean_all"
+            else "warm_mean_first_discarded"
+        ),
         "output_dir": slug,
     }
 
@@ -771,7 +791,7 @@ def write_summary_csv(rows: list[dict], path: Path) -> None:
         writer.writerows(rows)
 
 
-def plot_suite_summary(rows: list[dict], output_dir: Path) -> None:
+def plot_suite_summary(rows: list[dict], output_dir: Path, timing_primary: str) -> None:
     if not rows:
         return
     try:
@@ -815,7 +835,12 @@ def plot_suite_summary(rows: list[dict], output_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(fig_width, 5.0))
     ax.bar(x - width / 2, [row["dire_fit_seconds"] for row in rows], width, label="DiReEVoC")
     ax.bar(x + width / 2, [row["pure_fit_seconds"] for row in rows], width, label="Pure EVoC")
-    ax.set_title("Fit time by dataset (mean, first run included)")
+    title_suffix = (
+        "mean, first run included"
+        if timing_primary == "mean_all"
+        else "warm mean, first run discarded"
+    )
+    ax.set_title(f"Fit time by dataset ({title_suffix})")
     ax.set_ylabel("seconds")
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=35, ha="right")
@@ -824,6 +849,30 @@ def plot_suite_summary(rows: list[dict], output_dir: Path) -> None:
     fig.tight_layout()
     fig.savefig(output_dir / "suite_fit_seconds.svg", format="svg")
     plt.close(fig)
+
+    if any(row.get("dire_fit_seconds_mean_all") is not None for row in rows):
+        fig, ax = plt.subplots(figsize=(fig_width, 5.0))
+        ax.bar(
+            x - width / 2,
+            [row["dire_fit_seconds_mean_all"] for row in rows],
+            width,
+            label="DiReEVoC",
+        )
+        ax.bar(
+            x + width / 2,
+            [row["pure_fit_seconds_mean_all"] for row in rows],
+            width,
+            label="Pure EVoC",
+        )
+        ax.set_title("Fit time by dataset (mean, first run included)")
+        ax.set_ylabel("seconds")
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=35, ha="right")
+        ax.grid(axis="y", alpha=0.25)
+        ax.legend(frameon=False, ncol=2)
+        fig.tight_layout()
+        fig.savefig(output_dir / "suite_fit_seconds_mean_all.svg", format="svg")
+        plt.close(fig)
 
     if any(row.get("dire_fit_seconds_warm_mean") is not None for row in rows):
         fig, ax = plt.subplots(figsize=(fig_width, 5.0))
@@ -906,9 +955,15 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help=(
-            "repeat each timed benchmark this many times; summary fit_seconds keeps "
-            "the first run included and warm-only fields discard it"
+            "repeat each timed benchmark this many times; suite fit_seconds follows "
+            "--timing-primary and metrics also record first-run, mean-all, and warm-only fields"
         ),
+    )
+    parser.add_argument(
+        "--timing-primary",
+        default="warm_mean",
+        choices=["warm_mean", "mean_all"],
+        help="which repeated timing summary is reported in suite fit_seconds",
     )
     parser.add_argument("--use-gpu", default="auto", choices=["auto", "true", "false"])
     parser.add_argument(
@@ -939,7 +994,12 @@ def main() -> int:
         "output_dir": str(output_dir),
         "cache_dir": str(dataset_dir),
         "timing_repeats": int(args.timing_repeats),
-        "timing_policy": "mean_all_first_included",
+        "timing_primary": args.timing_primary,
+        "timing_policy": (
+            "mean_all_first_included"
+            if args.timing_primary == "mean_all"
+            else "warm_mean_first_discarded"
+        ),
         "runs": [],
     }
     rows = []
@@ -976,7 +1036,13 @@ def main() -> int:
                     continue
                 return run["returncode"]
             if metrics_path.exists():
-                rows.append(metrics_row(spec.slug, json.loads(metrics_path.read_text())))
+                rows.append(
+                    metrics_row(
+                        spec.slug,
+                        json.loads(metrics_path.read_text()),
+                        args.timing_primary,
+                    )
+                )
         except Exception as exc:
             failure = {"name": slug, "returncode": 1, "error": repr(exc)}
             manifest["runs"].append(failure)
@@ -985,7 +1051,7 @@ def main() -> int:
                 raise
 
     write_summary_csv(rows, output_dir / "suite_metrics.csv")
-    plot_suite_summary(rows, output_dir)
+    plot_suite_summary(rows, output_dir, args.timing_primary)
     manifest["success"] = all(run.get("returncode") == 0 for run in manifest["runs"])
     manifest["summary_csv"] = str(output_dir / "suite_metrics.csv")
     manifest["summary_svgs"] = [
@@ -993,6 +1059,7 @@ def main() -> int:
         str(output_dir / "suite_auto_delta.svg"),
         str(output_dir / "suite_fit_seconds.svg"),
         str(output_dir / "suite_fit_seconds_warm.svg"),
+        str(output_dir / "suite_fit_seconds_mean_all.svg"),
     ]
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(json.dumps(manifest, indent=2))

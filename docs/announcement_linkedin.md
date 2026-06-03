@@ -8,7 +8,8 @@ and add the pieces that only make sense at the intersection.
 **What you get:**
 🔹 *A broader CUDA repro, not just a cherry-picked table.* The default run now covers 13
 datasets, writes per-dataset SVG/JSON/CSV artifacts, uses matched EVoC base controls for
-DiRe→EVōC and pure EVōC, and records 20-run timings with first-run and warm-only fields.
+DiRe→EVōC and pure EVōC, and records 20-run warm-primary timings plus first-run and
+first-included fields.
 DiRe→EVōC wins Fashion-MNIST (**0.440 vs 0.390**), breast cancer (**0.404 vs 0.116**),
 iris (**0.562 vs 0.236**), wine (**0.465 vs 0.121**), and pooled CIFAR-10
 (**0.029 vs 0.012**); moons/circles are feasible ties when both methods use

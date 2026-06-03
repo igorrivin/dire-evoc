@@ -66,6 +66,8 @@ def dataset_suite_command(args: argparse.Namespace, output_dir: Path) -> list[st
         str(args.max_iter_layout),
         "--timing-repeats",
         str(args.timing_repeats),
+        "--timing-primary",
+        args.timing_primary,
         "--use-gpu",
         args.use_gpu,
         "--selector",
@@ -128,9 +130,15 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help=(
-            "repeat each timed benchmark this many times; metrics keep first-included "
-            "and warm-only summaries"
+            "repeat each timed benchmark this many times; suite fit_seconds follows "
+            "--timing-primary and metrics also record first-run, mean-all, and warm-only summaries"
         ),
+    )
+    parser.add_argument(
+        "--timing-primary",
+        default="warm_mean",
+        choices=["warm_mean", "mean_all"],
+        help="which repeated timing summary is reported in suite fit_seconds",
     )
     parser.add_argument("--use-gpu", default="auto", choices=["auto", "true", "false"])
     parser.add_argument(
@@ -154,7 +162,12 @@ def main() -> int:
         "include_graphs": args.include_graphs,
         "prefer_hf": args.prefer_hf,
         "timing_repeats": int(args.timing_repeats),
-        "timing_policy": "mean_all_first_included",
+        "timing_primary": args.timing_primary,
+        "timing_policy": (
+            "mean_all_first_included"
+            if args.timing_primary == "mean_all"
+            else "warm_mean_first_discarded"
+        ),
         "runs": [],
     }
 
@@ -183,6 +196,7 @@ def main() -> int:
         str(output_dir / "suite_auto_delta.svg"),
         str(output_dir / "suite_fit_seconds.svg"),
         str(output_dir / "suite_fit_seconds_warm.svg"),
+        str(output_dir / "suite_fit_seconds_mean_all.svg"),
     ]
     (output_dir / "cuda_repro_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(json.dumps(manifest, indent=2))

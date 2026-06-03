@@ -23,8 +23,8 @@ trees are `artifacts/cuda-timing-repeats-default/` and the merged
 This run uses matched EVoC controls for both methods. The dataset suite chooses
 `base_min_cluster_size` case-by-case, and uses `base_n_clusters=2` for the synthetic
 moons and circles controls where the feasible benchmark target is known. Each timed fit
-is repeated 20 times. The primary timing fields are means with the first run included;
-warm-only means are also recorded.
+is repeated 20 times. The primary timing fields are warm means with the first run
+discarded; first-run and first-included means are also recorded.
 
 Operational auto ARI vs ground truth:
 
@@ -55,21 +55,21 @@ Timing from the same CUDA run:
 
 ![CUDA fit runtime comparison](_static/benchmark_fit_seconds.svg)
 
-| dataset | DiReEVoC fit | pure EVoC fit | DiRe warm | pure warm | intrinsic dim | matched base control |
+| dataset | DiReEVoC warm fit | pure EVoC warm fit | DiRe mean all | pure mean all | intrinsic dim | matched base control |
 |---|---:|---:|---:|---:|---:|---|
-| Synthetic blobs 12k | 3.43s | 0.73s | 3.03s | 0.15s | 22.51 | min_samples=10, base_min_cluster_size=100 |
-| Synthetic moons 12k | 1.65s | 0.15s | 1.43s | 0.15s | 2.03 | min_samples=10, base_min_cluster_size=100, base_n_clusters=2 |
-| Synthetic circles 12k | 1.67s | 0.15s | 1.44s | 0.15s | 2.07 | min_samples=10, base_min_cluster_size=100, base_n_clusters=2 |
-| MNIST | 20.75s | 1.17s | 20.37s | 0.59s | 13.86 | min_samples=10, base_min_cluster_size=100 |
-| sklearn digits | 3.08s | 0.08s | 2.71s | 0.07s | 8.66 | min_samples=10, base_min_cluster_size=10 |
-| sklearn iris | 0.51s | 0.06s | 0.20s | 0.06s | 2.92 | min_samples=10, base_min_cluster_size=5 |
-| sklearn wine | 0.57s | 0.06s | 0.21s | 0.06s | 4.05 | min_samples=10, base_min_cluster_size=5 |
-| sklearn breast cancer | 0.96s | 0.06s | 0.62s | 0.06s | 3.61 | min_samples=10, base_min_cluster_size=5 |
-| Fashion-MNIST | 23.33s | 0.63s | 23.13s | 0.62s | 15.56 | min_samples=10, base_min_cluster_size=100 |
-| DBpedia-14 BGE-small | 15.83s | 0.65s | 15.45s | 0.65s | 25.69 | min_samples=10, base_min_cluster_size=100 |
-| Olivetti faces | 0.89s | 0.20s | 0.56s | 0.19s | 5.21 | min_samples=10, base_min_cluster_size=2 |
-| Forest CoverType | 16.21s | 0.48s | 15.84s | 0.47s | 3.04 | min_samples=10, base_min_cluster_size=100 |
-| CIFAR-10 | 15.30s | 1.51s | 14.87s | 0.60s | 26.39 | min_samples=10, base_min_cluster_size=100 |
+| Synthetic blobs 12k | 3.03s | 0.15s | 3.43s | 0.73s | 22.51 | min_samples=10, base_min_cluster_size=100 |
+| Synthetic moons 12k | 1.43s | 0.15s | 1.65s | 0.15s | 2.03 | min_samples=10, base_min_cluster_size=100, base_n_clusters=2 |
+| Synthetic circles 12k | 1.44s | 0.15s | 1.67s | 0.15s | 2.07 | min_samples=10, base_min_cluster_size=100, base_n_clusters=2 |
+| MNIST | 20.37s | 0.59s | 20.75s | 1.17s | 13.86 | min_samples=10, base_min_cluster_size=100 |
+| sklearn digits | 2.71s | 0.07s | 3.08s | 0.08s | 8.66 | min_samples=10, base_min_cluster_size=10 |
+| sklearn iris | 0.20s | 0.06s | 0.51s | 0.06s | 2.92 | min_samples=10, base_min_cluster_size=5 |
+| sklearn wine | 0.21s | 0.06s | 0.57s | 0.06s | 4.05 | min_samples=10, base_min_cluster_size=5 |
+| sklearn breast cancer | 0.62s | 0.06s | 0.96s | 0.06s | 3.61 | min_samples=10, base_min_cluster_size=5 |
+| Fashion-MNIST | 23.13s | 0.62s | 23.33s | 0.63s | 15.56 | min_samples=10, base_min_cluster_size=100 |
+| DBpedia-14 BGE-small | 15.45s | 0.65s | 15.83s | 0.65s | 25.69 | min_samples=10, base_min_cluster_size=100 |
+| Olivetti faces | 0.56s | 0.19s | 0.89s | 0.20s | 5.21 | min_samples=10, base_min_cluster_size=2 |
+| Forest CoverType | 15.84s | 0.47s | 16.21s | 0.48s | 3.04 | min_samples=10, base_min_cluster_size=100 |
+| CIFAR-10 | 14.87s | 0.60s | 15.30s | 1.51s | 26.39 | min_samples=10, base_min_cluster_size=100 |
 
 ![CUDA fit runtime ratio](_static/benchmark_fit_ratio.svg)
 
@@ -165,5 +165,11 @@ python examples/benchmark_dataset_suite.py --datasets default \
   --output-dir artifacts/dataset-suite --test-fraction 0.2 --timing-repeats 20
 ```
 
-With repeated timings, `fit_seconds` is the mean over all runs with the first run
-included. Warm-only fields such as `fit_seconds_warm_mean` discard that first run.
+With repeated timings, `fit_seconds` is the warm mean with the first run discarded by
+default (`--timing-primary warm_mean`). `fit_seconds_first`,
+`fit_seconds_mean_all`, and `fit_seconds_warm_mean` are recorded separately. Rebuild the
+README/Sphinx figures from existing artifacts with:
+
+```bash
+python scripts/plot_benchmark_metrics.py
+```
