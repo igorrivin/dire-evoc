@@ -154,6 +154,31 @@ available, and the same matched EVoC controls. The completed CUDA artifact tree 
 | Wiki-CS full | 11,701 | 0.203 | 0.140 | 17.47s | 11.74s |
 | OGBN-Arxiv full | 169,343 | 0.007 | 0.016 | 57.21s | 2.73s |
 
+The selector branch adds an opt-in guarded graph-component selector
+(`selector="auto"`). It keeps coverage-weighted silhouette as the fallback, then accepts
+a stable small-k connected-component layer from the DiRe layout graph only when it matches
+an explicit `base_n_clusters` control or passes fragmentation guards. The selector sweep
+artifact is `artifacts/selector-auto-full/`.
+
+![Guarded auto selector ARI](docs/_static/benchmark_selector_auto_vs_pure.svg)
+
+![Guarded auto selector delta](docs/_static/benchmark_selector_auto_delta_vs_pure.svg)
+
+| Selector dataset | DiReEVoC guarded auto ARI | Pure EVoC auto ARI | Notes |
+| --- | ---: | ---: | --- |
+| Synthetic blobs 30k | 1.000 | 1.000 | silhouette fallback |
+| Synthetic circles 30k | 1.000 | 1.000 | graph layer accepted by `base_n_clusters=2` |
+| Synthetic moons 30k | 1.000 | 1.000 | graph layer accepted by `base_n_clusters=2` |
+| Separated spirals 30k | 1.000 | n/a | graph layer accepted by `base_n_clusters=3`; pure EVoC's PCA initializer rejects exact 2D input |
+| MNIST full | 0.883 | 0.892 | silhouette fallback |
+| Fashion-MNIST full | 0.389 | 0.327 | silhouette fallback |
+| CIFAR-10 full | 0.029 | 0.009 | silhouette fallback |
+| OptDigits full | 0.824 | 0.147 | pure baseline from existing 4,496-row OpenML-extra artifact |
+| PenDigits full | 0.780 | 0.125 | graph candidate rejected; pure baseline from existing 8,794-row artifact |
+| SatImage full | 0.604 | 0.507 | pure baseline from existing 5,144-row artifact |
+| Image Segmentation full | 0.152 | 0.135 | pure baseline from existing 1,848-row artifact |
+| Vehicle full | 0.110 | 0.077 | graph candidate rejected; pure baseline from existing 677-row artifact |
+
 The honest boundary:
 
 - This is not a universal clustering-quality win.

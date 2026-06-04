@@ -18,6 +18,11 @@ import numpy as np
 
 from .dimension import intrinsic_dimension_from_dire
 from .predict import knn_vote_predict, prepare_reference
+from .selectors import (
+    best_layer as select_best_layer,
+    coverage_silhouette_score,
+    guarded_graph_component_decision,
+)
 
 __all__ = ["DiReEVoC"]
 
@@ -42,21 +47,23 @@ class DiReEVoC:
         Whether to build the single-linkage tree on the GPU (cuML). "auto" uses the GPU
         iff cuML imports. The DiRe layout can still use its own acceleration when this
         is false; this flag controls the EVoC-phase hybrid.
-    selector : {"silhouette", "silhouette_raw", "base", "none"}, default="silhouette"
+    selector : {"silhouette", "auto", "auto_ensemble", "silhouette_raw", "base", "none"}, default="silhouette"
         How to pick the operative layer for ``labels_``. "silhouette" uses
         COVERAGE-WEIGHTED silhouette (mean silhouette over all points, noise scored 0) --
         the validated default; it avoids the over-segmentation that plain silhouette
         suffers when a layer discards much of the data as noise. "silhouette_raw" is the
-        old non-coverage-weighted behaviour; "base" uses the finest layer; "none" the
-        coarsest.
+        old non-coverage-weighted behaviour. "auto" uses the same silhouette fallback
+        plus guarded stable graph-component overrides. "auto_ensemble" additionally
+        records a noisy-or confidence combination and requires graph confidence to beat
+        silhouette confidence. "base" uses the finest layer; "none" the coarsest.
     adaptive_min_samples : bool, default=True
         If the base clustering labels more than ``noise_gate`` of the points as noise --
         the signature of a layout too tight for EVoC's default density smoothing (the
         whole layer set comes out over-fragmented) -- re-cluster at larger ``min_samples``
         and re-select by the same coverage-weighted score, adopting the result only if it
         strictly beats the base. Genuinely diffuse data (continuous manifolds) keeps its
-        honest high-noise result because nothing beats it. Only active for the default
-        "silhouette" selector.
+        honest high-noise result because nothing beats it. Active for the silhouette-based
+        selectors: "silhouette", "auto", and "auto_ensemble".
     noise_gate : float, default=0.5
         Noise fraction above which the adaptive ``min_samples`` search is triggered.
     graph_component_candidates : bool, default=True
@@ -189,33 +196,24 @@ class DiReEVoC:
 
         ``silhouette(clustered) * coverage`` = mean silhouette over all points with noise
         scored 0. Returns -inf for a degenerate layer (<2 clusters among the sample)."""
-        from sklearn.metrics import silhouette_score
-        mask = lab_sample >= 0
-        if np.unique(lab_sample[mask]).size < 2:
-            return -np.inf
-        s = silhouette_score(Xs[mask], lab_sample[mask])
-        if self.selector != "silhouette_raw":
-            s *= mask.mean()
-        return float(s)
+        return coverage_silhouette_score(
+            Xs,
+            lab_sample,
+            raw=self.selector == "silhouette_raw",
+        )
 
     def _best_layer(self, layout, layers):
         """Return (index, score) of the operative layer under the configured selector.
 
         ``score`` is the coverage-weighted silhouette of the chosen layer, used both to
         pick within a layer set and to compare candidate sets across smoothing params."""
-        rng = np.random.default_rng(self.random_state)
-        n = layout.shape[0]
-        sample = (rng.choice(n, 10_000, replace=False) if n > 10_000 else np.arange(n))
-        Xs = layout[sample]
-        if self.selector == "base" or len(layers) == 1:
-            i = 0
-        elif self.selector == "none":
-            i = len(layers) - 1
-        else:
-            scores = [self._layer_score(Xs, lab[sample]) for lab in layers]
-            i = int(np.argmax(scores))
-            return i, scores[i]
-        return i, self._layer_score(Xs, layers[i][sample])
+        i, score, _ = select_best_layer(
+            layout,
+            layers,
+            selector=self.selector,
+            random_state=self.random_state,
+        )
+        return i, score
 
     def _adaptive_smoothing_candidates(self):
         """Smoothing candidates for tight layouts that over-fragment at defaults."""
@@ -396,38 +394,27 @@ class DiReEVoC:
         self.graph_component_layer_ = len(layers) - 1
         return layers, membership_layers, persistence
 
-    def _should_select_graph_component_layer(self, evoc_labels, graph_labels):
+    def _should_select_graph_component_layer(
+        self,
+        evoc_labels,
+        graph_labels,
+        silhouette_score=None,
+    ):
         """Choose the graph candidate only when it fixes clear EVoC fragmentation."""
-        info = dict(getattr(self, "graph_component_candidate_", {}) or {})
-        if not info.get("accepted"):
-            return False, info
-
-        evoc_labels = np.asarray(evoc_labels)
-        graph_labels = np.asarray(graph_labels)
-        evoc_clusters = int(np.unique(evoc_labels[evoc_labels >= 0]).size)
-        graph_clusters = int(np.unique(graph_labels[graph_labels >= 0]).size)
-        info.update(
-            {
-                "evoc_selected_clusters": evoc_clusters,
-                "graph_selected_clusters": graph_clusters,
-                "evoc_selected_noise": float(np.mean(evoc_labels < 0)),
-            }
+        decision = guarded_graph_component_decision(
+            evoc_labels=evoc_labels,
+            graph_labels=graph_labels,
+            graph_info=getattr(self, "graph_component_candidate_", {}) or {},
+            base_n_clusters=self.base_n_clusters,
+            min_cluster_ratio=self.graph_component_min_cluster_ratio,
+            policy=(
+                "auto_ensemble"
+                if self.selector == "auto_ensemble"
+                else "guarded_override"
+            ),
+            silhouette_score=silhouette_score,
         )
-        if graph_clusters < 2:
-            info["selection_reason"] = "too_few_graph_clusters"
-            return False, info
-        if self.base_n_clusters is not None and graph_clusters == self.base_n_clusters:
-            info["selection_reason"] = "matches_base_n_clusters"
-            return True, info
-
-        cluster_ratio = evoc_clusters / max(1, graph_clusters)
-        info["evoc_to_graph_cluster_ratio"] = float(cluster_ratio)
-        if cluster_ratio >= self.graph_component_min_cluster_ratio:
-            info["selection_reason"] = "evoc_fragmented_relative_to_graph"
-            return True, info
-
-        info["selection_reason"] = "evoc_not_fragmented_relative_to_graph"
-        return False, info
+        return decision.selected, decision.diagnostics
 
     def _maybe_adapt_smoothing(
         self,
@@ -452,7 +439,7 @@ class DiReEVoC:
         selected_base_min_cluster_size = self.base_min_cluster_size
         if not (
             self.adaptive_min_samples
-            and self.selector == "silhouette"
+            and self.selector in {"silhouette", "auto", "auto_ensemble"}
             and (layers[0] < 0).mean() > self.noise_gate
         ):
             return (
@@ -606,7 +593,10 @@ class DiReEVoC:
         selected_layer,
         reducer,
     ):
-        if not (self.merge_fragments and self.selector == "silhouette"):
+        if not (
+            self.merge_fragments
+            and self.selector in {"silhouette", "auto", "auto_ensemble"}
+        ):
             return layers, membership_layers, persistence, selected_layer, {
                 "merged": False,
                 "reason": "disabled",
@@ -714,10 +704,14 @@ class DiReEVoC:
             membership_layers,
             persistence,
         )
-        if getattr(self, "graph_component_layer_", None) is not None:
+        if (
+            getattr(self, "graph_component_layer_", None) is not None
+            and self.selector in {"auto", "auto_ensemble"}
+        ):
             use_graph, graph_info = self._should_select_graph_component_layer(
                 layers[sel],
                 layers[self.graph_component_layer_],
+                silhouette_score=score,
             )
             self.graph_component_candidate_ = graph_info
             if use_graph:

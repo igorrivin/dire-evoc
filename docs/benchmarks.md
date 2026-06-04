@@ -137,6 +137,48 @@ Wiki-CS is the torch-geometric graph-feature row in the scale preset.
 
 ![Scale CUDA fit runtime ratio](_static/benchmark_scale_fit_ratio.svg)
 
+## Guarded graph-component selector sweep
+
+The selector branch adds an opt-in `selector="auto"` mode. It keeps the
+coverage-weighted silhouette result as the fallback, then tests a stable connected-
+component labelling from the DiRe layout graph near `ceil(intrinsic_dimension) + 1`
+neighbours. The graph layer is accepted only when it matches an explicit
+`base_n_clusters` control or passes fragmentation guards; otherwise the silhouette layer
+is used.
+
+This sweep was run on the same large synthetic/image/OpenML cases as the scale-quality
+discussion, with matched `base_min_cluster_size` and `base_n_clusters` controls. The
+selector artifact is `artifacts/selector-auto-full/`, and the plotting script writes
+`selector_vs_pure.csv` plus the figures below. For OptDigits, PenDigits, SatImage,
+Image Segmentation, and Vehicle, the pure EVoC baseline shown here is the existing
+OpenML-extra artifact with an 80/20 split, so those rows are contextual vanilla
+baselines until rerun as full-materialization pure EVoC rows.
+
+![Guarded auto selector ARI](_static/benchmark_selector_auto_vs_pure.svg)
+
+![Guarded auto selector delta](_static/benchmark_selector_auto_delta_vs_pure.svg)
+
+| dataset | n | d | DiReEVoC silhouette | DiReEVoC guarded auto | pure EVoC auto | graph decision |
+|---|---:|---:|---:|---:|---:|---|
+| Synthetic blobs 30k | 30,000 | 32 | 1.000 | 1.000 | 1.000 | fallback: no stable large components |
+| Synthetic circles 30k | 30,000 | 8 | 1.000 | 1.000 | 1.000 | accepted: matches `base_n_clusters=2` |
+| Synthetic moons 30k | 30,000 | 8 | 1.000 | 1.000 | 1.000 | accepted: matches `base_n_clusters=2` |
+| Separated spirals 30k | 30,000 | 2 | 0.151 | 1.000 | n/a | accepted: matches `base_n_clusters=3` |
+| MNIST full | 70,000 | 784 | 0.883 | 0.883 | 0.892 | fallback: no stable large components |
+| Fashion-MNIST full | 70,000 | 784 | 0.390 | 0.389 | 0.327 | fallback: no stable large components |
+| CIFAR-10 full | 60,000 | 768 | 0.029 | 0.029 | 0.009 | fallback: no stable large components |
+| OptDigits full | 5,620 | 64 | 0.825 | 0.824 | 0.147 | fallback: no stable large components |
+| PenDigits full | 10,992 | 16 | 0.780 | 0.780 | 0.125 | rejected: too few graph clusters without `base_n_clusters` |
+| SatImage full | 6,430 | 36 | 0.604 | 0.604 | 0.507 | fallback: no stable large components |
+| Image Segmentation full | 2,310 | 19 | 0.153 | 0.152 | 0.135 | fallback: no stable large components |
+| Vehicle full | 846 | 18 | 0.110 | 0.110 | 0.077 | rejected: too few graph clusters without `base_n_clusters` |
+
+Separated spirals are the only row where the new graph candidate materially changes the
+selected partition in this sweep: coverage-weighted silhouette picks a two-cluster,
+high-noise layer (`0.151` ARI), while the guarded graph layer recovers the three spirals
+at `1.000` ARI. Pure EVoC is not reported for that exact row because upstream EVoC's PCA
+initializer rejects 2D input for its default component count.
+
 ## Layer selection
 
 `DiReEVoC` uses coverage-weighted silhouette by default: mean silhouette over all points,
