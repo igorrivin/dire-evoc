@@ -58,10 +58,18 @@ multiplies by coverage, treating noise as a zero-silhouette contribution. This a
 failure mode where a layer discards many difficult points as noise and receives an
 artificially high plain silhouette score.
 
+Before final selection, DiReEVoC can append one extra candidate layer from DiRe's stored
+kNN graph. It sweeps neighbour counts around ``ceil(intrinsic_dimension) + 1`` and keeps
+a connected-component labelling only when adjacent k values agree and every component is
+at least ``base_min_cluster_size``. That graph candidate overrides the EVoC layer only
+when the post-merge EVoC result is visibly more fragmented, or when it matches an explicit
+``base_n_clusters`` control.
+
 Available selectors:
 
 ``"silhouette"``
-   Coverage-weighted silhouette. This is the default.
+   Coverage-weighted silhouette plus the guarded graph-component candidate. This is the
+   default.
 
 ``"silhouette_raw"``
    Plain silhouette over clustered points only.

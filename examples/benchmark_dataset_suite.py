@@ -778,6 +778,21 @@ def benchmark_command(spec: DatasetSpec, npz_path: Path, output_dir: Path, args)
         "--selector",
         args.selector,
     ]
+    command.append(
+        "--graph-component-candidates"
+        if args.graph_component_candidates
+        else "--no-graph-component-candidates"
+    )
+    command.extend(
+        [
+            "--graph-component-min-stability",
+            str(args.graph_component_min_stability),
+            "--graph-component-k-radius",
+            str(args.graph_component_k_radius),
+            "--graph-component-min-cluster-ratio",
+            str(args.graph_component_min_cluster_ratio),
+        ]
+    )
     if base_n_clusters is not None:
         command.extend(["--base-n-clusters", str(base_n_clusters)])
     subsample = None if args.full else (args.subsample or spec.default_subsample)
@@ -1053,6 +1068,14 @@ def parse_args() -> argparse.Namespace:
         default="silhouette",
         choices=["silhouette", "silhouette_raw", "base", "none"],
     )
+    parser.add_argument(
+        "--graph-component-candidates",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument("--graph-component-min-stability", type=float, default=0.95)
+    parser.add_argument("--graph-component-k-radius", type=int, default=4)
+    parser.add_argument("--graph-component-min-cluster-ratio", type=float, default=1.5)
     parser.add_argument("--skip-fixed-k", action="store_true")
     return parser.parse_args()
 

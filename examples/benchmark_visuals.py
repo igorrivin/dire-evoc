@@ -246,6 +246,10 @@ def _fit_dire_evoc_profile_once(X_train, y_train, X_test, y_test, args):
         base_n_clusters=args.base_n_clusters,
         use_gpu=args.use_gpu,
         selector=args.selector,
+        graph_component_candidates=args.graph_component_candidates,
+        graph_component_min_stability=args.graph_component_min_stability,
+        graph_component_k_radius=args.graph_component_k_radius,
+        graph_component_min_cluster_ratio=args.graph_component_min_cluster_ratio,
         random_state=args.seed,
         n_neighbors=args.n_neighbors,
         max_iter_layout=args.max_iter_layout,
@@ -354,6 +358,12 @@ def _fit_dire_evoc_profile_once(X_train, y_train, X_test, y_test, args):
             "selected_min_samples": int(selected_min_samples),
             "selected_base_min_cluster_size": int(selected_base_min_cluster_size),
             "fragment_merge": fragment_merge,
+            "graph_component_candidate": to_jsonable(
+                getattr(model, "graph_component_candidate_", None)
+            ),
+            "graph_component_layer": None
+            if getattr(model, "graph_component_layer_", None) is None
+            else int(model.graph_component_layer_),
             "on_gpu": bool(on_gpu),
             "layout_shape": list(layout.shape),
             "intrinsic_dimension": None
@@ -729,6 +739,14 @@ def parse_args():
         default="silhouette",
         choices=["silhouette", "silhouette_raw", "base", "none"],
     )
+    p.add_argument(
+        "--graph-component-candidates",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    p.add_argument("--graph-component-min-stability", type=float, default=0.95)
+    p.add_argument("--graph-component-k-radius", type=int, default=4)
+    p.add_argument("--graph-component-min-cluster-ratio", type=float, default=1.5)
     p.add_argument("--skip-fixed-k", action="store_true")
     return p.parse_args()
 
@@ -794,6 +812,13 @@ def main():
             "base_n_clusters": None
             if args.base_n_clusters is None
             else int(args.base_n_clusters),
+            "selector": args.selector,
+            "graph_component_candidates": bool(args.graph_component_candidates),
+            "graph_component_min_stability": float(args.graph_component_min_stability),
+            "graph_component_k_radius": int(args.graph_component_k_radius),
+            "graph_component_min_cluster_ratio": float(
+                args.graph_component_min_cluster_ratio
+            ),
             "timing_repeats": int(args.timing_repeats),
             "timing_primary": args.timing_primary,
             "timing_policy": timing_policy(args),

@@ -59,6 +59,18 @@ class DiReEVoC:
         "silhouette" selector.
     noise_gate : float, default=0.5
         Noise fraction above which the adaptive ``min_samples`` search is triggered.
+    graph_component_candidates : bool, default=True
+        If DiRe's stored kNN graph has stable connected components across a small
+        neighbour-count sweep, append that labelling as a candidate auto layer.
+    graph_component_min_stability : float, default=0.95
+        Adjusted-Rand agreement required between adjacent kNN-component labellings.
+    graph_component_k_radius : int, default=4
+        Sweep radius around ``ceil(intrinsic_dimension) + 1`` for the graph-component
+        candidate.
+    graph_component_min_cluster_ratio : float, default=1.5
+        The post-merge EVoC selected layer must have at least this many clusters per
+        graph component before the graph candidate overrides it, unless
+        ``base_n_clusters`` is set and matched.
     n_neighbors_predict : int or None
         Neighbours for the out-of-sample vote; defaults to the DiRe ``n_neighbors``.
     random_state : int or None
@@ -78,6 +90,7 @@ class DiReEVoC:
     selected_min_samples_ : int                min_samples actually used (> min_samples if
                                                the adaptive search escalated it)
     selected_base_min_cluster_size_ : int      base_min_cluster_size actually used
+    graph_component_candidate_ : dict          diagnostics for the graph-component gate
     """
 
     def __init__(self, n_components=8, metric="cosine", min_samples=10,
@@ -87,6 +100,10 @@ class DiReEVoC:
                  merge_fragments=True, fragment_merge_min_edges=3,
                  fragment_merge_edge_fraction=0.01,
                  fragment_merge_min_score_ratio=0.25,
+                 graph_component_candidates=True,
+                 graph_component_min_stability=0.95,
+                 graph_component_k_radius=4,
+                 graph_component_min_cluster_ratio=1.5,
                  gpu_cluster_min_samples=1000,
                  n_neighbors_predict=None, random_state=None, **dire_kwargs):
         self.n_components = n_components
@@ -102,6 +119,10 @@ class DiReEVoC:
         self.fragment_merge_min_edges = fragment_merge_min_edges
         self.fragment_merge_edge_fraction = fragment_merge_edge_fraction
         self.fragment_merge_min_score_ratio = fragment_merge_min_score_ratio
+        self.graph_component_candidates = graph_component_candidates
+        self.graph_component_min_stability = graph_component_min_stability
+        self.graph_component_k_radius = graph_component_k_radius
+        self.graph_component_min_cluster_ratio = graph_component_min_cluster_ratio
         self.gpu_cluster_min_samples = gpu_cluster_min_samples
         self.n_neighbors_predict = n_neighbors_predict
         self.random_state = random_state
@@ -217,6 +238,196 @@ class DiReEVoC:
                     seen.add(key)
                     candidates.append(key)
         return candidates
+
+    def _knn_component_labels(self, knn_indices, k):
+        """Connected components of the undirected first-k neighbour graph."""
+        knn_indices = np.asarray(knn_indices)
+        n = knn_indices.shape[0]
+        k = int(min(max(1, k), knn_indices.shape[1]))
+        parent = np.arange(n, dtype=np.int64)
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a, b):
+            ra = find(a)
+            rb = find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        for i in range(n):
+            for j in knn_indices[i, :k]:
+                j = int(j)
+                if 0 <= j < n and j != i:
+                    union(i, j)
+
+        roots = np.array([find(i) for i in range(n)], dtype=np.int64)
+        _, labels = np.unique(roots, return_inverse=True)
+        return labels.astype(np.int64, copy=False)
+
+    def _graph_component_candidate(self, reducer, min_component_size):
+        """Return a stable small-k graph-component labelling, if one exists.
+
+        This targets the case where the DiRe neighbour graph has already separated the
+        data before EVoC's hierarchy/selector sees the right layer. It is deliberately
+        gated by adjacent-k stability and component size so a connected manifold is not
+        split just because one small graph happened to fragment.
+        """
+        if not self.graph_component_candidates:
+            return None, {"enabled": False}
+
+        knn_indices = getattr(reducer, "_knn_indices", None)
+        if knn_indices is None:
+            return None, {"enabled": True, "accepted": False, "reason": "missing_knn"}
+        knn_indices = np.asarray(knn_indices)
+        if knn_indices.ndim != 2 or knn_indices.shape[0] == 0 or knn_indices.shape[1] == 0:
+            return None, {"enabled": True, "accepted": False, "reason": "bad_knn_shape"}
+
+        from sklearn.metrics import adjusted_rand_score
+
+        n = knn_indices.shape[0]
+        max_k = knn_indices.shape[1]
+        try:
+            intrinsic_dim = intrinsic_dimension_from_dire(reducer, method="twonn")
+        except Exception:
+            intrinsic_dim = None
+        center = 3 if intrinsic_dim is None else int(np.ceil(intrinsic_dim)) + 1
+        radius = int(max(0, self.graph_component_k_radius))
+        k_values = [
+            k for k in range(center - radius, center + radius + 1)
+            if 1 <= k <= max_k
+        ]
+        if not k_values:
+            k_values = [min(max(1, center), max_k)]
+
+        records = []
+        by_k = {}
+        for k in sorted(set(k_values)):
+            labels = self._knn_component_labels(knn_indices, k)
+            counts = np.bincount(labels)
+            component_count = int(counts.size)
+            min_size = int(counts.min()) if counts.size else 0
+            large_count = int(np.sum(counts >= min_component_size))
+            valid = (
+                2 <= component_count
+                and component_count < n
+                and min_size >= min_component_size
+            )
+            by_k[k] = labels
+            records.append(
+                {
+                    "k": int(k),
+                    "components": component_count,
+                    "min_size": min_size,
+                    "large_components": large_count,
+                    "valid": bool(valid),
+                }
+            )
+
+        best = None
+        for left, right in zip(records, records[1:]):
+            if not (left["valid"] and right["valid"]):
+                continue
+            stability = float(
+                adjusted_rand_score(by_k[left["k"]], by_k[right["k"]])
+            )
+            if stability < self.graph_component_min_stability:
+                continue
+            labels = by_k[left["k"]]
+            score_key = (
+                stability,
+                -abs(left["k"] - center),
+                -left["components"],
+            )
+            if best is None or score_key > best[0]:
+                best = (
+                    score_key,
+                    labels,
+                    {
+                        "enabled": True,
+                        "accepted": True,
+                        "k": int(left["k"]),
+                        "next_k": int(right["k"]),
+                        "stability": stability,
+                        "components": int(left["components"]),
+                        "min_size": int(left["min_size"]),
+                        "intrinsic_dimension": None
+                        if intrinsic_dim is None
+                        else float(intrinsic_dim),
+                        "records": records,
+                    },
+                )
+
+        if best is None:
+            return None, {
+                "enabled": True,
+                "accepted": False,
+                "reason": "no_stable_large_components",
+                "intrinsic_dimension": None
+                if intrinsic_dim is None
+                else float(intrinsic_dim),
+                "records": records,
+            }
+        return best[1], best[2]
+
+    def _maybe_add_graph_component_layer(
+        self,
+        reducer,
+        layers,
+        membership_layers,
+        persistence,
+    ):
+        labels, info = self._graph_component_candidate(
+            reducer,
+            min_component_size=max(2, int(self.base_min_cluster_size)),
+        )
+        self.graph_component_candidate_ = info
+        self.graph_component_layer_ = None
+        if labels is None:
+            return layers, membership_layers, persistence
+        layers = list(layers) + [labels]
+        membership_layers = list(membership_layers) + [
+            np.ones(labels.shape[0], dtype=np.float32)
+        ]
+        persistence = list(persistence) + [float(info["stability"])]
+        self.graph_component_layer_ = len(layers) - 1
+        return layers, membership_layers, persistence
+
+    def _should_select_graph_component_layer(self, evoc_labels, graph_labels):
+        """Choose the graph candidate only when it fixes clear EVoC fragmentation."""
+        info = dict(getattr(self, "graph_component_candidate_", {}) or {})
+        if not info.get("accepted"):
+            return False, info
+
+        evoc_labels = np.asarray(evoc_labels)
+        graph_labels = np.asarray(graph_labels)
+        evoc_clusters = int(np.unique(evoc_labels[evoc_labels >= 0]).size)
+        graph_clusters = int(np.unique(graph_labels[graph_labels >= 0]).size)
+        info.update(
+            {
+                "evoc_selected_clusters": evoc_clusters,
+                "graph_selected_clusters": graph_clusters,
+                "evoc_selected_noise": float(np.mean(evoc_labels < 0)),
+            }
+        )
+        if graph_clusters < 2:
+            info["selection_reason"] = "too_few_graph_clusters"
+            return False, info
+        if self.base_n_clusters is not None and graph_clusters == self.base_n_clusters:
+            info["selection_reason"] = "matches_base_n_clusters"
+            return True, info
+
+        cluster_ratio = evoc_clusters / max(1, graph_clusters)
+        info["evoc_to_graph_cluster_ratio"] = float(cluster_ratio)
+        if cluster_ratio >= self.graph_component_min_cluster_ratio:
+            info["selection_reason"] = "evoc_fragmented_relative_to_graph"
+            return True, info
+
+        info["selection_reason"] = "evoc_not_fragmented_relative_to_graph"
+        return False, info
 
     def _maybe_adapt_smoothing(
         self,
@@ -400,6 +611,11 @@ class DiReEVoC:
                 "merged": False,
                 "reason": "disabled",
             }
+        if selected_layer == getattr(self, "graph_component_layer_", None):
+            return layers, membership_layers, persistence, selected_layer, {
+                "merged": False,
+                "reason": "graph_component_layer",
+            }
 
         merged_labels, info = self._fragment_merge_labels(
             layers[selected_layer],
@@ -452,6 +668,12 @@ class DiReEVoC:
     def fit(self, X, y=None):
         X = np.ascontiguousarray(X)
         on_gpu = self._resolve_gpu()
+        self.graph_component_layer_ = None
+        self.graph_component_candidate_ = {
+            "enabled": bool(self.graph_component_candidates),
+            "accepted": False,
+            "reason": "not_evaluated",
+        }
         self.layout_, self.reducer_ = self._build_layout(X)
         layers, membership_layers, persistence = self._cluster(self.layout_, on_gpu)
         sel, score = self._best_layer(self.layout_, layers)
@@ -486,6 +708,21 @@ class DiReEVoC:
             sel,
             self.reducer_,
         )
+        layers, membership_layers, persistence = self._maybe_add_graph_component_layer(
+            self.reducer_,
+            layers,
+            membership_layers,
+            persistence,
+        )
+        if getattr(self, "graph_component_layer_", None) is not None:
+            use_graph, graph_info = self._should_select_graph_component_layer(
+                layers[sel],
+                layers[self.graph_component_layer_],
+            )
+            self.graph_component_candidate_ = graph_info
+            if use_graph:
+                sel = self.graph_component_layer_
+                score = self._layer_score(self.layout_, layers[sel])
 
         self.cluster_layers_ = layers
         self.membership_strength_layers_ = membership_layers

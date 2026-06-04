@@ -102,3 +102,29 @@ def test_fragment_merge_keeps_separated_blobs_apart():
 
     assert not info["merged"]
     assert np.array_equal(merged, labels)
+
+
+def test_graph_component_candidate_accepts_stable_small_k_components():
+    """Stable connected components in the stored kNN graph should become a candidate."""
+    x = np.linspace(0.0, 10.0, 200)
+    top = np.column_stack([x, np.zeros_like(x)])
+    bottom = np.column_stack([x, np.ones_like(x) * 10.0])
+    X = np.vstack([top, bottom])
+
+    class Reducer:
+        _knn_indices = _knn_indices(X, k=8)
+
+    model = DiReEVoC(
+        graph_component_min_stability=0.95,
+        graph_component_k_radius=1,
+        base_min_cluster_size=20,
+    )
+    labels, info = model._graph_component_candidate(Reducer(), min_component_size=20)
+
+    assert info["accepted"]
+    assert info["components"] == 2
+    assert labels is not None
+    assert np.unique(labels).size == 2
+    assert np.unique(labels[:200]).size == 1
+    assert np.unique(labels[200:]).size == 1
+    assert labels[0] != labels[-1]
