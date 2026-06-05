@@ -31,9 +31,14 @@ def dbpedia14(out="/tmp/dbpedia_emb.npz", per_class=3500, model="BAAI/bge-small-
     db = load_dataset("fancyzhx/dbpedia_14", split="train")
     labels = np.asarray(db["label"], dtype=np.int64)
     rng = np.random.default_rng(0)
-    keep = np.concatenate([rng.choice(np.where(labels == c)[0], per_class, replace=False)
-                           for c in np.unique(labels)])
-    rng.shuffle(keep)
+    if per_class is None:
+        keep = np.arange(len(labels))
+    else:
+        keep = np.concatenate([
+            rng.choice(np.where(labels == c)[0], per_class, replace=False)
+            for c in np.unique(labels)
+        ])
+        rng.shuffle(keep)
     texts = [db["content"][i] for i in keep.tolist()]
     emb = SentenceTransformer(model, device="cuda").encode(
         texts, batch_size=512, normalize_embeddings=True, convert_to_numpy=True,

@@ -77,7 +77,7 @@ condense/persistence/layer post-process. If EVoC exposes
 `build_cluster_layers(..., precomputed_linkage=slt)`, that seam is used; otherwise
 `dire-evoc` calls EVoC's tree utilities directly. On the CUDA benchmark run, the
 EVoC-on-layout phase is usually small relative to DiRe layout construction, though the
-full 13-dataset repro shows that timings are strongly dataset- and backend-dependent.
+full 18-dataset repro shows that timings are strongly dataset- and backend-dependent.
 
 ## 4. Out-of-sample assignment — `predict`
 
@@ -95,14 +95,27 @@ labels, membership = knn_vote_predict(prepare_reference(X_new), ref, train_label
 
 ```bash
 python examples/benchmark_dataset_suite.py --list-datasets
+python examples/benchmark_dataset_suite.py --datasets smoke \
+  --output-dir artifacts/smoke-suite --timing-repeats 20
 python examples/benchmark_dataset_suite.py --datasets default \
-  --output-dir artifacts/dataset-suite --test-fraction 0.2
+  --output-dir artifacts/dataset-suite --test-fraction 0.2 --timing-repeats 20
+python examples/benchmark_dataset_suite.py --datasets scale \
+  --output-dir artifacts/scale-suite --prefer-hf --timing-repeats 1 \
+  --test-fraction 0.0 --continue-on-error
 ```
 
-The default suite compares DiReEVoC against pure EVoC on synthetic blobs, moons, circles,
-sklearn digits/iris/wine/breast-cancer/Olivetti, MNIST, Fashion-MNIST, DBpedia-14,
-Forest CoverType, and CIFAR-10. OpenML is tried first by default; sklearn-native OpenML
-datasets use sklearn as fallback, and other mirrored OpenML datasets use Hugging Face as
-fallback. Dataset-specific defaults keep `base_min_cluster_size` matched between
-DiReEVoC and pure EVoC; moons and circles also use `base_n_clusters=2` because their
-feasible benchmark target is known.
+The `smoke` preset runs only synthetic blobs, moons, and circles. The default suite keeps
+those same synthetic cases and adds sklearn digits/iris/wine/breast-cancer/Olivetti,
+MNIST, Fashion-MNIST, DBpedia-14, Forest CoverType, CIFAR-10, OptDigits, PenDigits,
+SatImage, Image Segmentation, and Vehicle. CIFAR-10 is pooled to 16x16 RGB features for
+the benchmark so it stays on the DiRe cuVS kNN path. OpenML is
+tried first by default; sklearn-native OpenML datasets use sklearn as fallback, and other
+mirrored OpenML datasets use Hugging Face as fallback. Dataset-specific defaults keep
+`base_min_cluster_size` matched between DiReEVoC and pure EVoC; moons and circles also
+use `base_n_clusters=2` because their feasible benchmark target is known. Repeated
+timings use warm means in `fit_seconds` by default, while first-run, mean-all, and
+warm-only summaries are written separately. The `scale` preset is single-run by design
+and uses full materializations where available: 30k synthetic controls, full MNIST,
+full Fashion-MNIST, full CIFAR-10, full DBpedia-14 embeddings, full Forest CoverType,
+Olivetti faces, Wiki-CS, and OGBN-Arxiv. Optional graph-feature datasets are Wiki-CS
+and OGBN-Arxiv.

@@ -9,6 +9,11 @@ summaries.
 Typical Docker run:
 
     python3 examples/run_cuda_repro.py --output-dir artifacts/cuda
+
+Full-scale one-run regime:
+
+    python3 examples/run_cuda_repro.py --datasets scale --prefer-hf \
+        --timing-repeats 1 --continue-on-error --output-dir artifacts/scale
 """
 
 from __future__ import annotations
@@ -64,6 +69,10 @@ def dataset_suite_command(args: argparse.Namespace, output_dir: Path) -> list[st
         str(args.predict_neighbors),
         "--max-iter-layout",
         str(args.max_iter_layout),
+        "--timing-repeats",
+        str(args.timing_repeats),
+        "--timing-primary",
+        args.timing_primary,
         "--use-gpu",
         args.use_gpu,
         "--selector",
@@ -92,13 +101,21 @@ def dataset_suite_command(args: argparse.Namespace, output_dir: Path) -> list[st
     return command
 
 
+def timing_policy(timing_repeats: int, timing_primary: str) -> str:
+    if max(1, int(timing_repeats)) == 1:
+        return "single_run"
+    if timing_primary == "mean_all":
+        return "mean_all_first_included"
+    return "warm_mean_first_discarded"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default="artifacts/cuda")
     parser.add_argument(
         "--datasets",
         default="default",
-        help="dataset suite selection: default, all, graphs, or comma-separated slugs",
+        help="dataset suite selection: smoke, default, scale, all, graphs, or comma-separated slugs",
     )
     parser.add_argument("--include-graphs", action="store_true")
     parser.add_argument("--continue-on-error", action="store_true")
@@ -112,7 +129,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--subsample", type=int, default=None)
     parser.add_argument("--full", action="store_true")
-    parser.add_argument("--test-fraction", type=float, default=0.2)
+    parser.add_argument(
+        "--test-fraction",
+        type=float,
+        default=None,
+        help="holdout fraction; defaults to 0.0 for scale and 0.2 otherwise",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--min-samples", type=int, default=10)
     parser.add_argument("--base-min-cluster-size", type=int, default=None)
@@ -121,6 +143,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-neighbors", type=int, default=15)
     parser.add_argument("--predict-neighbors", type=int, default=15)
     parser.add_argument("--max-iter-layout", type=int, default=100)
+    parser.add_argument(
+        "--timing-repeats",
+        type=int,
+        default=1,
+        help=(
+            "repeat each timed benchmark this many times; suite fit_seconds follows "
+            "--timing-primary and metrics also record first-run, mean-all, and warm-only summaries"
+        ),
+    )
+    parser.add_argument(
+        "--timing-primary",
+        default="warm_mean",
+        choices=["warm_mean", "mean_all"],
+        help="which repeated timing summary is reported in suite fit_seconds",
+    )
     parser.add_argument("--use-gpu", default="auto", choices=["auto", "true", "false"])
     parser.add_argument(
         "--selector",
@@ -133,6 +170,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    args.timing_repeats = max(1, int(args.timing_repeats))
+    if args.test_fraction is None:
+        args.test_fraction = 0.0 if args.datasets == "scale" else 0.2
+    if args.datasets == "scale":
+        args.full = True
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -141,6 +183,9 @@ def main() -> int:
         "datasets": args.datasets,
         "include_graphs": args.include_graphs,
         "prefer_hf": args.prefer_hf,
+        "timing_repeats": int(args.timing_repeats),
+        "timing_primary": args.timing_primary,
+        "timing_policy": timing_policy(args.timing_repeats, args.timing_primary),
         "runs": [],
     }
 
@@ -168,6 +213,8 @@ def main() -> int:
         str(output_dir / "suite_auto_ari.svg"),
         str(output_dir / "suite_auto_delta.svg"),
         str(output_dir / "suite_fit_seconds.svg"),
+        str(output_dir / "suite_fit_seconds_warm.svg"),
+        str(output_dir / "suite_fit_seconds_mean_all.svg"),
     ]
     (output_dir / "cuda_repro_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(json.dumps(manifest, indent=2))

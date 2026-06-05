@@ -8,8 +8,14 @@ for each dataset, and writes suite-level CSV/SVG summaries.
 Examples:
     python examples/benchmark_dataset_suite.py --list-datasets
 
+    python examples/benchmark_dataset_suite.py --datasets smoke \
+        --output-dir artifacts/smoke-suite --test-fraction 0.0
+
     python examples/benchmark_dataset_suite.py --datasets default \
         --output-dir artifacts/openml-suite --test-fraction 0.2
+
+    python examples/benchmark_dataset_suite.py --datasets scale \
+        --output-dir artifacts/scale-suite --prefer-hf --timing-repeats 1
 
     python examples/benchmark_dataset_suite.py --datasets blobs,mnist,fashion_mnist,covertype \
         --output-dir artifacts/openml-smoke --subsample 12000 --skip-existing
@@ -45,9 +51,11 @@ class DatasetSpec:
     hf_name: str | None = None
     hf_kind: str = "image"
     hf_split: str = "train"
+    hf_full_split: str | None = None
     hf_image_column: str = "image"
     hf_label_column: str = "label"
     hf_max_rows: int | None = None
+    hf_image_pool: int = 1
     sklearn_fallback: str | None = None
     default_subsample: int | None = None
     default_base_min_cluster_size: int | None = None
@@ -118,6 +126,7 @@ DATASETS: dict[str, DatasetSpec] = {
         openml_id=554,
         hf_name="ylecun/mnist",
         hf_kind="image",
+        hf_full_split="train+test",
         default_subsample=30000,
         default_base_min_cluster_size=100,
         note="OpenML mnist_784; falls back to Hugging Face ylecun/mnist.",
@@ -129,6 +138,7 @@ DATASETS: dict[str, DatasetSpec] = {
         openml_id=40996,
         hf_name="zalando-datasets/fashion_mnist",
         hf_kind="image",
+        hf_full_split="train+test",
         default_subsample=30000,
         default_base_min_cluster_size=100,
         note="OpenML Fashion-MNIST; falls back to Hugging Face zalando-datasets/fashion_mnist.",
@@ -148,10 +158,15 @@ DATASETS: dict[str, DatasetSpec] = {
         openml_id=40927,
         hf_name="uoft-cs/cifar10",
         hf_kind="image",
+        hf_full_split="train+test",
         hf_image_column="img",
-        default_subsample=1500,
-        default_base_min_cluster_size=25,
-        note="Raw 32x32 RGB pixels; falls back to Hugging Face uoft-cs/cifar10.",
+        hf_image_pool=2,
+        default_subsample=30000,
+        default_base_min_cluster_size=100,
+        note=(
+            "32x32 RGB pixels average-pooled to 16x16 RGB for the benchmark; "
+            "falls back to Hugging Face uoft-cs/cifar10."
+        ),
     ),
     "usps": DatasetSpec(
         "usps",
@@ -255,14 +270,6 @@ DATASETS: dict[str, DatasetSpec] = {
         default_base_min_cluster_size=100,
         note="Optional graph-feature dataset; requires torch-geometric.",
     ),
-    "facebook_page_page": DatasetSpec(
-        "facebook_page_page",
-        "Facebook Page-Page",
-        "pyg_facebook_page_page",
-        default_subsample=30000,
-        default_base_min_cluster_size=100,
-        note="Optional graph-feature dataset; requires torch-geometric.",
-    ),
     "ogbn_arxiv": DatasetSpec(
         "ogbn_arxiv",
         "OGBN-Arxiv",
@@ -273,11 +280,42 @@ DATASETS: dict[str, DatasetSpec] = {
     ),
 }
 
+SCALE_DATASETS: dict[str, DatasetSpec] = {
+    "blobs30k": DatasetSpec(
+        "blobs30k",
+        "Synthetic blobs 30k",
+        "synthetic_blobs_30k",
+        default_base_min_cluster_size=100,
+        note="Generated locally; 30k density-separated clusters.",
+    ),
+    "moons30k": DatasetSpec(
+        "moons30k",
+        "Synthetic moons 30k",
+        "synthetic_moons_30k",
+        default_base_min_cluster_size=100,
+        default_base_n_clusters=2,
+        note="Generated locally; 30k nonlinear two-cluster geometry.",
+    ),
+    "circles30k": DatasetSpec(
+        "circles30k",
+        "Synthetic circles 30k",
+        "synthetic_circles_30k",
+        default_base_min_cluster_size=100,
+        default_base_n_clusters=2,
+        note="Generated locally; 30k nested nonlinear cluster geometry.",
+    ),
+}
 
-DEFAULT_DATASETS = (
+DATASETS.update(SCALE_DATASETS)
+
+
+SMOKE_DATASETS = (
     "blobs",
     "moons",
     "circles",
+)
+DEFAULT_DATASETS = (
+    *SMOKE_DATASETS,
     "mnist",
     "digits",
     "iris",
@@ -288,8 +326,26 @@ DEFAULT_DATASETS = (
     "olivetti_faces",
     "covertype",
     "cifar10",
+    "optdigits",
+    "pendigits",
+    "satimage",
+    "segment",
+    "vehicle",
 )
-GRAPH_DATASETS = ("wiki_cs", "facebook_page_page", "ogbn_arxiv")
+GRAPH_DATASETS = ("wiki_cs", "ogbn_arxiv")
+SCALE_BENCHMARK_DATASETS = (
+    "blobs30k",
+    "moons30k",
+    "circles30k",
+    "mnist",
+    "fashion_mnist",
+    "cifar10",
+    "dbpedia14",
+    "covertype",
+    "olivetti_faces",
+    "wiki_cs",
+    "ogbn_arxiv",
+)
 
 
 def safe_slug(value: str) -> str:
@@ -341,7 +397,12 @@ def save_npz(path: Path, X, y) -> None:
     np.savez(path, X=X, y=encoded_y)
 
 
-def fetch_openml_npz(spec: DatasetSpec, path: Path, allow_hf_fallback: bool = True) -> None:
+def fetch_openml_npz(
+    spec: DatasetSpec,
+    path: Path,
+    allow_hf_fallback: bool = True,
+    full: bool = False,
+) -> None:
     from sklearn.datasets import fetch_openml
 
     kwargs = {"as_frame": False}
@@ -356,7 +417,7 @@ def fetch_openml_npz(spec: DatasetSpec, path: Path, allow_hf_fallback: bool = Tr
         except TypeError:
             ds = fetch_openml(**kwargs)
     except Exception:
-        fetch_openml_fallback_npz(spec, path, allow_hf=allow_hf_fallback)
+        fetch_openml_fallback_npz(spec, path, allow_hf=allow_hf_fallback, full=full)
         return
     save_npz(path, ds.data, ds.target)
 
@@ -365,6 +426,7 @@ def fetch_openml_fallback_npz(
     spec: DatasetSpec,
     path: Path,
     allow_hf: bool = True,
+    full: bool = False,
 ) -> None:
     """Fallback policy for OpenML-backed specs.
 
@@ -381,18 +443,18 @@ def fetch_openml_fallback_npz(
         return
     if allow_hf and spec.hf_name is not None:
         print(f"OpenML fetch failed for {spec.slug}; falling back to Hugging Face {spec.hf_name}")
-        fetch_hf_npz(spec, path)
+        fetch_hf_npz(spec, path, full=full)
         return
     raise RuntimeError(
         f"OpenML fetch failed for {spec.slug} and no sklearn/Hugging Face fallback is declared"
     )
 
 
-def fetch_hf_npz(spec: DatasetSpec, path: Path) -> None:
+def fetch_hf_npz(spec: DatasetSpec, path: Path, full: bool = False) -> None:
     if spec.hf_kind == "image":
-        fetch_hf_image_npz(spec, path)
+        fetch_hf_image_npz(spec, path, full=full)
     elif spec.hf_kind == "table":
-        fetch_hf_table_npz(spec, path)
+        fetch_hf_table_npz(spec, path, full=full)
     else:
         raise ValueError(f"unknown Hugging Face fallback kind: {spec.hf_kind}")
 
@@ -403,24 +465,43 @@ def maybe_limit_hf_rows(dataset, max_rows: int | None):
     return dataset.select(range(max_rows))
 
 
-def fetch_hf_image_npz(spec: DatasetSpec, path: Path) -> None:
+def image_to_features(image, pool: int = 1) -> np.ndarray:
+    array = np.asarray(image, dtype=np.float32)
+    if pool > 1:
+        if array.ndim == 2:
+            h, w = array.shape
+            h -= h % pool
+            w -= w % pool
+            array = array[:h, :w].reshape(h // pool, pool, w // pool, pool).mean(axis=(1, 3))
+        elif array.ndim == 3:
+            h, w, c = array.shape
+            h -= h % pool
+            w -= w % pool
+            array = (
+                array[:h, :w, :]
+                .reshape(h // pool, pool, w // pool, pool, c)
+                .mean(axis=(1, 3))
+            )
+    return array.reshape(-1)
+
+
+def fetch_hf_image_npz(spec: DatasetSpec, path: Path, full: bool = False) -> None:
     from datasets import load_dataset
 
-    dataset = load_dataset(spec.hf_name, split=spec.hf_split)
+    split = spec.hf_full_split if full and spec.hf_full_split is not None else spec.hf_split
+    dataset = load_dataset(spec.hf_name, split=split)
     dataset = maybe_limit_hf_rows(dataset, spec.hf_max_rows)
     images = dataset[spec.hf_image_column]
     labels = dataset[spec.hf_label_column]
-    X = np.stack(
-        [np.asarray(image, dtype=np.float32).reshape(-1) for image in images]
-    )
+    X = np.stack([image_to_features(image, spec.hf_image_pool) for image in images])
     save_npz(path, X, np.asarray(labels))
 
 
-def fetch_hf_table_npz(spec: DatasetSpec, path: Path) -> None:
+def fetch_hf_table_npz(spec: DatasetSpec, path: Path, full: bool = False) -> None:
     from datasets import load_dataset
 
     dataset = load_dataset(spec.hf_name, split=spec.hf_split)
-    dataset = maybe_limit_hf_rows(dataset, spec.hf_max_rows)
+    dataset = maybe_limit_hf_rows(dataset, None if full else spec.hf_max_rows)
     if spec.hf_label_column not in dataset.column_names:
         raise ValueError(
             f"label column {spec.hf_label_column!r} not found in {spec.hf_name}; "
@@ -440,17 +521,17 @@ def fetch_sklearn_fallback_npz(spec: DatasetSpec, path: Path) -> None:
     save_npz(path, ds.data, ds.target)
 
 
-def synthetic_blobs_npz(path: Path) -> None:
+def synthetic_blobs_npz(path: Path, n: int = 12000) -> None:
     from benchmark_visuals import gaussian_blobs
 
-    X, y = gaussian_blobs(n=12000, k=8, d=32, spread=0.10, seed=0)
+    X, y = gaussian_blobs(n=n, k=8, d=32, spread=0.10, seed=0)
     save_npz(path, X, y)
 
 
-def synthetic_moons_npz(path: Path) -> None:
+def synthetic_moons_npz(path: Path, n: int = 12000) -> None:
     from sklearn.datasets import make_moons
 
-    X, y = make_moons(n_samples=12000, noise=0.06, random_state=0)
+    X, y = make_moons(n_samples=n, noise=0.06, random_state=0)
     x0 = X[:, 0]
     x1 = X[:, 1]
     X = np.column_stack(
@@ -468,10 +549,10 @@ def synthetic_moons_npz(path: Path) -> None:
     save_npz(path, X, y)
 
 
-def synthetic_circles_npz(path: Path) -> None:
+def synthetic_circles_npz(path: Path, n: int = 12000) -> None:
     from sklearn.datasets import make_circles
 
-    X, y = make_circles(n_samples=12000, noise=0.04, factor=0.42, random_state=0)
+    X, y = make_circles(n_samples=n, noise=0.04, factor=0.42, random_state=0)
     x0 = X[:, 0]
     x1 = X[:, 1]
     radius = np.sqrt(x0 * x0 + x1 * x1)
@@ -533,13 +614,6 @@ def pyg_wiki_cs_npz(path: Path, cache_root: Path) -> None:
     save_npz(path, data.x.cpu().numpy(), data.y.cpu().numpy())
 
 
-def pyg_facebook_page_page_npz(path: Path, cache_root: Path) -> None:
-    from torch_geometric.datasets import FacebookPagePage
-
-    data = FacebookPagePage(root=str(cache_root / "pyg" / "facebook_page_page"))[0]
-    save_npz(path, data.x.cpu().numpy(), data.y.cpu().numpy())
-
-
 def ogb_arxiv_npz(path: Path, cache_root: Path) -> None:
     from ogb.nodeproppred import NodePropPredDataset
 
@@ -548,16 +622,31 @@ def ogb_arxiv_npz(path: Path, cache_root: Path) -> None:
     save_npz(path, graph["node_feat"], labels.reshape(-1))
 
 
-def hf_dbpedia14_npz(path: Path) -> None:
+def synthetic_blobs30k_npz(path: Path) -> None:
+    synthetic_blobs_npz(path, n=30000)
+
+
+def synthetic_moons30k_npz(path: Path) -> None:
+    synthetic_moons_npz(path, n=30000)
+
+
+def synthetic_circles30k_npz(path: Path) -> None:
+    synthetic_circles_npz(path, n=30000)
+
+
+def hf_dbpedia14_npz(path: Path, full: bool = False) -> None:
     from prepare_datasets import dbpedia14
 
-    dbpedia14(str(path))
+    dbpedia14(str(path), per_class=None if full else 3500)
 
 
 LOCAL_LOADERS: dict[str, Callable[[Path], None]] = {
     "synthetic_blobs": synthetic_blobs_npz,
     "synthetic_moons": synthetic_moons_npz,
     "synthetic_circles": synthetic_circles_npz,
+    "synthetic_blobs_30k": synthetic_blobs30k_npz,
+    "synthetic_moons_30k": synthetic_moons30k_npz,
+    "synthetic_circles_30k": synthetic_circles30k_npz,
     "sklearn_digits": sklearn_digits_npz,
     "sklearn_iris": sklearn_iris_npz,
     "sklearn_wine": sklearn_wine_npz,
@@ -572,8 +661,9 @@ def materialize_dataset(
     dataset_dir: Path,
     force: bool,
     prefer_hf: bool,
+    full: bool = False,
 ) -> Path:
-    path = dataset_dir / f"{spec.slug}.npz"
+    path = dataset_cache_path(spec, dataset_dir, full)
     if path.exists() and not force:
         return path
 
@@ -585,18 +675,19 @@ def materialize_dataset(
         elif prefer_hf and spec.hf_name is not None:
             print(f"using Hugging Face mirror for {spec.slug}: {spec.hf_name}")
             try:
-                fetch_hf_npz(spec, path)
+                fetch_hf_npz(spec, path, full=full)
             except Exception:
                 print(f"Hugging Face mirror failed for {spec.slug}; falling back to OpenML")
-                fetch_openml_npz(spec, path, allow_hf_fallback=False)
+                fetch_openml_npz(spec, path, allow_hf_fallback=False, full=full)
         else:
-            fetch_openml_npz(spec, path)
+            fetch_openml_npz(spec, path, full=full)
     elif spec.source in LOCAL_LOADERS:
-        LOCAL_LOADERS[spec.source](path)
+        if spec.source == "hf_dbpedia14":
+            hf_dbpedia14_npz(path, full=full)
+        else:
+            LOCAL_LOADERS[spec.source](path)
     elif spec.source == "pyg_wiki_cs":
         pyg_wiki_cs_npz(path, dataset_dir)
-    elif spec.source == "pyg_facebook_page_page":
-        pyg_facebook_page_page_npz(path, dataset_dir)
     elif spec.source == "ogb_arxiv":
         ogb_arxiv_npz(path, dataset_dir)
     else:
@@ -604,11 +695,24 @@ def materialize_dataset(
     return path
 
 
+def dataset_cache_path(spec: DatasetSpec, dataset_dir: Path, full: bool = False) -> Path:
+    suffix = "_full" if full else ""
+    return dataset_dir / f"{spec.slug}{suffix}.npz"
+
+
 def parse_dataset_selection(value: str, include_graphs: bool) -> list[str]:
-    if value == "default":
+    if value == "smoke":
+        slugs = list(SMOKE_DATASETS)
+    elif value == "default":
         slugs = list(DEFAULT_DATASETS)
+    elif value == "scale":
+        slugs = list(SCALE_BENCHMARK_DATASETS)
     elif value == "all":
-        slugs = [slug for slug in DATASETS if slug not in GRAPH_DATASETS]
+        slugs = [
+            slug
+            for slug in DATASETS
+            if slug not in GRAPH_DATASETS and slug not in SCALE_DATASETS
+        ]
     elif value == "graphs":
         slugs = list(GRAPH_DATASETS)
     else:
@@ -665,6 +769,10 @@ def benchmark_command(spec: DatasetSpec, npz_path: Path, output_dir: Path, args)
         str(args.predict_neighbors),
         "--max-iter-layout",
         str(args.max_iter_layout),
+        "--timing-repeats",
+        str(args.timing_repeats),
+        "--timing-primary",
+        args.timing_primary,
         "--use-gpu",
         args.use_gpu,
         "--selector",
@@ -699,9 +807,36 @@ def run_command(name: str, command: list[str], log_dir: Path) -> dict:
     }
 
 
-def metrics_row(slug: str, metrics: dict) -> dict:
+def metric_seconds(section: dict, key: str, timing_primary: str):
+    warm_key = f"{key}_warm_mean"
+    mean_all_key = f"{key}_mean_all"
+    if timing_primary == "warm_mean" and section.get(warm_key) is not None:
+        return section[warm_key]
+    if timing_primary == "mean_all":
+        return section.get(mean_all_key, section[key])
+    return section[key]
+
+
+def timing_policy(timing_repeats: int, timing_primary: str) -> str:
+    if max(1, int(timing_repeats)) == 1:
+        return "single_run"
+    if timing_primary == "mean_all":
+        return "mean_all_first_included"
+    return "warm_mean_first_discarded"
+
+
+def timing_title(rows: list[dict], timing_primary: str) -> str:
+    if rows and all(max(1, int(row.get("timing_repeats") or 1)) == 1 for row in rows):
+        return "single run"
+    if timing_primary == "mean_all":
+        return "mean, first run included"
+    return "warm mean, first run discarded"
+
+
+def metrics_row(slug: str, metrics: dict, timing_primary: str) -> dict:
     dire = metrics["dire_evoc"]
     pure = metrics["vanilla_evoc"]
+    timing_repeats = metrics["data"].get("timing_repeats", 1)
     return {
         "slug": slug,
         "dataset": metrics["data"]["label"],
@@ -718,8 +853,17 @@ def metrics_row(slug: str, metrics: dict) -> dict:
         "pure_oracle_ari": pure["oracle_ari"],
         "dire_fixed_k_ari": dire.get("fixed_k_ari"),
         "pure_fixed_k_ari": pure.get("fixed_k_ari"),
-        "dire_fit_seconds": dire["fit_seconds"],
-        "pure_fit_seconds": pure["fit_seconds"],
+        "dire_fit_seconds": metric_seconds(dire, "fit_seconds", timing_primary),
+        "pure_fit_seconds": metric_seconds(pure, "fit_seconds", timing_primary),
+        "dire_fit_seconds_mean_all": dire.get("fit_seconds_mean_all", dire["fit_seconds"]),
+        "pure_fit_seconds_mean_all": pure.get("fit_seconds_mean_all", pure["fit_seconds"]),
+        "dire_fit_seconds_first": dire.get("fit_seconds_first"),
+        "pure_fit_seconds_first": pure.get("fit_seconds_first"),
+        "dire_fit_seconds_warm_mean": dire.get("fit_seconds_warm_mean"),
+        "pure_fit_seconds_warm_mean": pure.get("fit_seconds_warm_mean"),
+        "timing_repeats": timing_repeats,
+        "timing_primary": timing_primary,
+        "timing_policy": timing_policy(timing_repeats, timing_primary),
         "output_dir": slug,
     }
 
@@ -733,7 +877,7 @@ def write_summary_csv(rows: list[dict], path: Path) -> None:
         writer.writerows(rows)
 
 
-def plot_suite_summary(rows: list[dict], output_dir: Path) -> None:
+def plot_suite_summary(rows: list[dict], output_dir: Path, timing_primary: str) -> None:
     if not rows:
         return
     try:
@@ -777,7 +921,7 @@ def plot_suite_summary(rows: list[dict], output_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(fig_width, 5.0))
     ax.bar(x - width / 2, [row["dire_fit_seconds"] for row in rows], width, label="DiReEVoC")
     ax.bar(x + width / 2, [row["pure_fit_seconds"] for row in rows], width, label="Pure EVoC")
-    ax.set_title("Fit time by dataset")
+    ax.set_title(f"Fit time by dataset ({timing_title(rows, timing_primary)})")
     ax.set_ylabel("seconds")
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=35, ha="right")
@@ -787,6 +931,54 @@ def plot_suite_summary(rows: list[dict], output_dir: Path) -> None:
     fig.savefig(output_dir / "suite_fit_seconds.svg", format="svg")
     plt.close(fig)
 
+    if any(row.get("dire_fit_seconds_mean_all") is not None for row in rows):
+        fig, ax = plt.subplots(figsize=(fig_width, 5.0))
+        ax.bar(
+            x - width / 2,
+            [row["dire_fit_seconds_mean_all"] for row in rows],
+            width,
+            label="DiReEVoC",
+        )
+        ax.bar(
+            x + width / 2,
+            [row["pure_fit_seconds_mean_all"] for row in rows],
+            width,
+            label="Pure EVoC",
+        )
+        ax.set_title(f"Fit time by dataset ({timing_title(rows, 'mean_all')})")
+        ax.set_ylabel("seconds")
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=35, ha="right")
+        ax.grid(axis="y", alpha=0.25)
+        ax.legend(frameon=False, ncol=2)
+        fig.tight_layout()
+        fig.savefig(output_dir / "suite_fit_seconds_mean_all.svg", format="svg")
+        plt.close(fig)
+
+    if any(row.get("dire_fit_seconds_warm_mean") is not None for row in rows):
+        fig, ax = plt.subplots(figsize=(fig_width, 5.0))
+        ax.bar(
+            x - width / 2,
+            [row["dire_fit_seconds_warm_mean"] for row in rows],
+            width,
+            label="DiReEVoC",
+        )
+        ax.bar(
+            x + width / 2,
+            [row["pure_fit_seconds_warm_mean"] for row in rows],
+            width,
+            label="Pure EVoC",
+        )
+        ax.set_title(f"Fit time by dataset ({timing_title(rows, 'warm_mean')})")
+        ax.set_ylabel("seconds")
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=35, ha="right")
+        ax.grid(axis="y", alpha=0.25)
+        ax.legend(frameon=False, ncol=2)
+        fig.tight_layout()
+        fig.savefig(output_dir / "suite_fit_seconds_warm.svg", format="svg")
+        plt.close(fig)
+
 
 def list_datasets() -> None:
     for slug, spec in DATASETS.items():
@@ -795,9 +987,11 @@ def list_datasets() -> None:
             source += f":{spec.openml_id}"
         elif spec.openml_name:
             source += f":{spec.openml_name}"
+        smoke = " smoke" if slug in SMOKE_DATASETS else ""
         default = " default" if slug in DEFAULT_DATASETS else ""
+        scale = " scale" if slug in SCALE_BENCHMARK_DATASETS else ""
         graph = " graph-optional" if slug in GRAPH_DATASETS else ""
-        print(f"{slug:<20} {source:<28} {spec.label}{default}{graph}")
+        print(f"{slug:<20} {source:<28} {spec.label}{smoke}{default}{scale}{graph}")
         if spec.note:
             print(f"{'':<50}{spec.note}")
 
@@ -808,7 +1002,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--datasets",
         default="default",
-        help="comma-separated slugs, or one of: default, all, graphs",
+        help="comma-separated slugs, or one of: smoke, default, scale, all, graphs",
     )
     parser.add_argument("--include-graphs", action="store_true")
     parser.add_argument("--output-dir", default="artifacts/dataset-suite")
@@ -838,6 +1032,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-neighbors", type=int, default=15)
     parser.add_argument("--predict-neighbors", type=int, default=15)
     parser.add_argument("--max-iter-layout", type=int, default=100)
+    parser.add_argument(
+        "--timing-repeats",
+        type=int,
+        default=1,
+        help=(
+            "repeat each timed benchmark this many times; suite fit_seconds follows "
+            "--timing-primary and metrics also record first-run, mean-all, and warm-only fields"
+        ),
+    )
+    parser.add_argument(
+        "--timing-primary",
+        default="warm_mean",
+        choices=["warm_mean", "mean_all"],
+        help="which repeated timing summary is reported in suite fit_seconds",
+    )
     parser.add_argument("--use-gpu", default="auto", choices=["auto", "true", "false"])
     parser.add_argument(
         "--selector",
@@ -850,6 +1059,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    args.timing_repeats = max(1, int(args.timing_repeats))
+    if args.datasets == "scale":
+        args.full = True
     if args.list_datasets:
         list_datasets()
         return 0
@@ -865,6 +1077,9 @@ def main() -> int:
         "datasets": slugs,
         "output_dir": str(output_dir),
         "cache_dir": str(dataset_dir),
+        "timing_repeats": int(args.timing_repeats),
+        "timing_primary": args.timing_primary,
+        "timing_policy": timing_policy(args.timing_repeats, args.timing_primary),
         "runs": [],
     }
     rows = []
@@ -873,13 +1088,14 @@ def main() -> int:
         spec = DATASETS[slug]
         try:
             npz_path = (
-                dataset_dir / f"{spec.slug}.npz"
+                dataset_cache_path(spec, dataset_dir, full=args.full)
                 if args.dry_run
                 else materialize_dataset(
                     spec,
                     dataset_dir,
                     force=args.force_fetch,
                     prefer_hf=args.prefer_hf,
+                    full=args.full,
                 )
             )
             command = benchmark_command(spec, npz_path, output_dir, args)
@@ -901,7 +1117,13 @@ def main() -> int:
                     continue
                 return run["returncode"]
             if metrics_path.exists():
-                rows.append(metrics_row(spec.slug, json.loads(metrics_path.read_text())))
+                rows.append(
+                    metrics_row(
+                        spec.slug,
+                        json.loads(metrics_path.read_text()),
+                        args.timing_primary,
+                    )
+                )
         except Exception as exc:
             failure = {"name": slug, "returncode": 1, "error": repr(exc)}
             manifest["runs"].append(failure)
@@ -910,13 +1132,15 @@ def main() -> int:
                 raise
 
     write_summary_csv(rows, output_dir / "suite_metrics.csv")
-    plot_suite_summary(rows, output_dir)
+    plot_suite_summary(rows, output_dir, args.timing_primary)
     manifest["success"] = all(run.get("returncode") == 0 for run in manifest["runs"])
     manifest["summary_csv"] = str(output_dir / "suite_metrics.csv")
     manifest["summary_svgs"] = [
         str(output_dir / "suite_auto_ari.svg"),
         str(output_dir / "suite_auto_delta.svg"),
         str(output_dir / "suite_fit_seconds.svg"),
+        str(output_dir / "suite_fit_seconds_warm.svg"),
+        str(output_dir / "suite_fit_seconds_mean_all.svg"),
     ]
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(json.dumps(manifest, indent=2))
