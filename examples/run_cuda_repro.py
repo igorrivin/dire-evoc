@@ -177,7 +177,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--selector",
         default="silhouette",
-        choices=["silhouette", "silhouette_raw", "base", "none"],
+        choices=["silhouette", "auto", "auto_ensemble", "silhouette_raw", "base", "none"],
     )
     parser.add_argument(
         "--graph-component-candidates",
