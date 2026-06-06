@@ -66,13 +66,18 @@ class DiReEVoC:
         selectors: "silhouette", "auto", and "auto_ensemble".
     noise_gate : float, default=0.5
         Noise fraction above which the adaptive ``min_samples`` search is triggered.
-    merge_fragments : bool, default=False
-        If True, post-process the selected layer by unioning clusters that share strong
-        reciprocal kNN evidence in DiRe's ORIGINAL-space graph (the signature of adjacent
-        pieces of one continuous component). This is a heuristic with hand-tuned thresholds
-        (``fragment_merge_*``) and a loose acceptance guard; it is **off by default pending
-        review** and only active for the "silhouette" selector. Validated to no-op on
-        well-separated data, but it can change clusterings on other inputs.
+    graph_component_candidates : bool, default=True
+        If DiRe's stored kNN graph has stable connected components across a small
+        neighbour-count sweep, append that labelling as a candidate auto layer.
+    graph_component_min_stability : float, default=0.95
+        Adjusted-Rand agreement required between adjacent kNN-component labellings.
+    graph_component_k_radius : int, default=4
+        Sweep radius around ``ceil(intrinsic_dimension) + 1`` for the graph-component
+        candidate.
+    graph_component_min_cluster_ratio : float, default=1.5
+        The post-merge EVoC selected layer must have at least this many clusters per
+        graph component before the graph candidate overrides it, unless
+        ``base_n_clusters`` is set and matched.
     n_neighbors_predict : int or None
         Neighbours for the out-of-sample vote; defaults to the DiRe ``n_neighbors``.
     random_state : int or None
@@ -99,7 +104,7 @@ class DiReEVoC:
                  base_min_cluster_size=5, base_n_clusters=None,
                  use_gpu="auto", selector="silhouette",
                  adaptive_min_samples=True, noise_gate=0.5,
-                 merge_fragments=False, fragment_merge_min_edges=3,
+                 merge_fragments=True, fragment_merge_min_edges=3,
                  fragment_merge_edge_fraction=0.01,
                  fragment_merge_min_score_ratio=0.25,
                  graph_component_candidates=True,
