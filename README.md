@@ -140,15 +140,18 @@ this sweep make the split concrete (MNIST full, one fit):
 | EVoC clustering | 1.4s | 3.0s (whole fit) |
 | Layer selection | 1.3s | — |
 | Adaptive smoothing | 24.4s | — |
-| Fragment merge | 58.7s | — |
 | Graph-component stage | 11.7s | — |
-| **Total fit** | **113.7s** | **3.0s** |
+| **Total fit** | **54.7s** | **3.0s** |
+
+(Timings are from a pre-removal benchmark run; the `merge_fragments` post-process — which
+cost ~59s on this fit — has since been removed, so re-run the suite to refresh the
+absolute numbers.)
 
 Two things follow. First, the embedding is a real, irreducible cost that pure EVoC does
-not pay (~16s here, ~14% of the fit) — but it is also what buys the quality on hard
+not pay (~16s here, ~29% of the fit) — but it is also what buys the quality on hard
 manifolds and yields a reusable layout for visualization and out-of-sample prediction.
-Second, on large data most of DiReEVoC's wall time is not the embedding at all but the
-DiRe-specific layer post-processing (adaptive smoothing + fragment merge ≈ 83s here). Pure
+Second, on large data a large share of DiReEVoC's wall time is not the embedding at all
+but the DiRe-specific layer post-processing (adaptive smoothing ≈ 24s here). Pure
 EVoC's ~3s fits are the right baseline to keep in mind: DiReEVoC is the much slower method
 and only earns its cost where the layout is a materially better substrate than the raw
 vectors (e.g. OptDigits/PenDigits/Segment, where the matched delta is large).

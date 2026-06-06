@@ -304,23 +304,6 @@ def _fit_dire_evoc_profile_once(X_train, y_train, X_test, y_test, args):
             selected_score,
         )
     )
-    (
-        layers,
-        membership_layers,
-        persistence,
-        selected_layer,
-        fragment_merge,
-    ), phases["fragment_merge_seconds"] = timed(
-        lambda: model._maybe_merge_fragments(
-            layout,
-            layers,
-            membership_layers,
-            persistence,
-            selected_layer,
-            reducer,
-        )
-    )
-
     # Guarded graph-component stage, mirroring DiReEVoC.fit() so the profiled "auto"
     # selector actually exercises the graph override (the per-phase timing breakdown is
     # why we hand-roll the pipeline instead of calling fit()).
@@ -390,7 +373,6 @@ def _fit_dire_evoc_profile_once(X_train, y_train, X_test, y_test, args):
                 + phases["evoc_cluster_seconds"]
                 + phases["layer_selection_seconds"]
                 + phases["adaptive_smoothing_seconds"]
-                + phases["fragment_merge_seconds"]
                 + phases["graph_component_seconds"]
                 + phases["intrinsic_dimension_seconds"]
                 + phases["prepare_reference_seconds"]
@@ -400,7 +382,6 @@ def _fit_dire_evoc_profile_once(X_train, y_train, X_test, y_test, args):
             "selected_layer": int(selected_layer),
             "selected_min_samples": int(selected_min_samples),
             "selected_base_min_cluster_size": int(selected_base_min_cluster_size),
-            "fragment_merge": fragment_merge,
             "graph_component_candidate": to_jsonable(
                 getattr(model, "graph_component_candidate_", None)
             ),
@@ -624,7 +605,6 @@ def plot_timings(metrics, output_dir):
         "EVoC on layout",
         "Layer selector",
         "Adaptive smoothing",
-        "Fragment merge",
         "ID",
         "Predict",
     ]
@@ -634,7 +614,6 @@ def plot_timings(metrics, output_dir):
         timings.get("evoc_cluster_seconds", 0.0),
         timings.get("layer_selection_seconds", 0.0),
         timings.get("adaptive_smoothing_seconds", 0.0),
-        timings.get("fragment_merge_seconds", 0.0),
         timings.get("intrinsic_dimension_seconds", 0.0),
         timings.get("predict_seconds", 0.0),
     ]
@@ -642,7 +621,6 @@ def plot_timings(metrics, output_dir):
         COLORS["evoc"],
         COLORS["dire"],
         COLORS["dire"],
-        COLORS["neutral"],
         COLORS["neutral"],
         COLORS["neutral"],
         COLORS["accent"],

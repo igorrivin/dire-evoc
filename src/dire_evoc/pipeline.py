@@ -104,9 +104,6 @@ class DiReEVoC:
                  base_min_cluster_size=5, base_n_clusters=None,
                  use_gpu="auto", selector="silhouette",
                  adaptive_min_samples=True, noise_gate=0.5,
-                 merge_fragments=True, fragment_merge_min_edges=3,
-                 fragment_merge_edge_fraction=0.01,
-                 fragment_merge_min_score_ratio=0.25,
                  graph_component_candidates=True,
                  graph_component_min_stability=0.95,
                  graph_component_k_radius=4,
@@ -122,10 +119,6 @@ class DiReEVoC:
         self.selector = selector
         self.adaptive_min_samples = adaptive_min_samples
         self.noise_gate = noise_gate
-        self.merge_fragments = merge_fragments
-        self.fragment_merge_min_edges = fragment_merge_min_edges
-        self.fragment_merge_edge_fraction = fragment_merge_edge_fraction
-        self.fragment_merge_min_score_ratio = fragment_merge_min_score_ratio
         self.graph_component_candidates = graph_component_candidates
         self.graph_component_min_stability = graph_component_min_stability
         self.graph_component_k_radius = graph_component_k_radius
@@ -478,182 +471,6 @@ class DiReEVoC:
                 best = (sc, si, ls, lm, lp, ms, bmc)
         return best
 
-    def _fragment_merge_labels(self, labels, knn_indices):
-        """Merge selected-layer fragments using DiRe's original-space kNN graph.
-
-        This is deliberately graph-local rather than a generic penalty for high ``k``:
-        many separated blobs in low intrinsic dimension should stay separate. We only
-        union two selected clusters when they have enough *reciprocal* cross-neighbour
-        evidence in the existing kNN graph, the signature of adjacent pieces of one
-        continuous component.
-        """
-        labels = np.asarray(labels)
-        if knn_indices is None:
-            return labels, {"merged": False, "reason": "missing_knn"}
-        knn_indices = np.asarray(knn_indices)
-        if knn_indices.ndim != 2 or knn_indices.shape[0] != labels.shape[0]:
-            return labels, {"merged": False, "reason": "bad_knn_shape"}
-
-        active = labels >= 0
-        unique = np.unique(labels[active])
-        if unique.size < 3:
-            return labels, {"merged": False, "reason": "too_few_clusters"}
-
-        label_to_pos = {int(label): i for i, label in enumerate(unique)}
-        pos_to_label = {i: int(label) for label, i in label_to_pos.items()}
-        sizes = np.array([np.sum(labels == label) for label in unique], dtype=np.int64)
-        directed = {}
-        noise_bridges = {}
-        for i, lab in enumerate(labels):
-            if lab < 0:
-                neighbour_labels = []
-                for j in knn_indices[i]:
-                    if j < 0 or j >= labels.shape[0] or j == i:
-                        continue
-                    other = labels[int(j)]
-                    if other >= 0:
-                        neighbour_labels.append(label_to_pos[int(other)])
-                for offset, a in enumerate(sorted(set(neighbour_labels))):
-                    for b in sorted(set(neighbour_labels))[offset + 1:]:
-                        key = (a, b) if a < b else (b, a)
-                        noise_bridges[key] = noise_bridges.get(key, 0) + 1
-                continue
-            a = label_to_pos[int(lab)]
-            for j in knn_indices[i]:
-                if j < 0 or j >= labels.shape[0] or j == i:
-                    continue
-                other = labels[int(j)]
-                if other < 0 or other == lab:
-                    continue
-                b = label_to_pos[int(other)]
-                directed[(a, b)] = directed.get((a, b), 0) + 1
-
-        parent = np.arange(unique.size)
-
-        def find(x):
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
-
-        def union(a, b):
-            ra = find(a)
-            rb = find(b)
-            if ra != rb:
-                parent[rb] = ra
-
-        merged_edges = 0
-        for (a, b), count_ab in list(directed.items()):
-            if a >= b:
-                continue
-            reciprocal_edges = min(count_ab, directed.get((b, a), 0))
-            if reciprocal_edges < self.fragment_merge_min_edges:
-                continue
-            smaller = max(1, int(min(sizes[a], sizes[b])))
-            if reciprocal_edges / smaller >= self.fragment_merge_edge_fraction:
-                union(a, b)
-                merged_edges += 1
-
-        bridge_edges = 0
-        for (a, b), bridge_count in noise_bridges.items():
-            if bridge_count >= self.fragment_merge_min_edges:
-                union(a, b)
-                bridge_edges += 1
-
-        roots = np.array([find(i) for i in range(unique.size)])
-        if np.unique(roots).size == unique.size:
-            return labels, {
-                "merged": False,
-                "reason": "no_strong_adjacencies",
-                "candidate_edges": int(len(directed)),
-                "candidate_bridges": int(len(noise_bridges)),
-            }
-
-        root_to_new = {
-            root: new_label
-            for new_label, root in enumerate(sorted(np.unique(roots)))
-        }
-        merged_labels = labels.copy()
-        for old_pos, old_label in pos_to_label.items():
-            merged_labels[labels == old_label] = root_to_new[find(old_pos)]
-        return merged_labels, {
-            "merged": True,
-            "merged_edges": int(merged_edges),
-            "bridge_edges": int(bridge_edges),
-            "clusters_before": int(unique.size),
-            "clusters_after": int(np.unique(merged_labels[merged_labels >= 0]).size),
-        }
-
-    def _maybe_merge_fragments(
-        self,
-        layout,
-        layers,
-        membership_layers,
-        persistence,
-        selected_layer,
-        reducer,
-    ):
-        if not (
-            self.merge_fragments
-            and self.selector in {"silhouette", "auto", "auto_ensemble"}
-        ):
-            return layers, membership_layers, persistence, selected_layer, {
-                "merged": False,
-                "reason": "disabled",
-            }
-        if selected_layer == getattr(self, "graph_component_layer_", None):
-            return layers, membership_layers, persistence, selected_layer, {
-                "merged": False,
-                "reason": "graph_component_layer",
-            }
-
-        merged_labels, info = self._fragment_merge_labels(
-            layers[selected_layer],
-            getattr(reducer, "_knn_indices", None),
-        )
-        if not info.get("merged"):
-            return layers, membership_layers, persistence, selected_layer, info
-
-        base_score = self._layer_score(layout, layers[selected_layer])
-        merged_score = self._layer_score(layout, merged_labels)
-        clusters_after = int(np.unique(merged_labels[merged_labels >= 0]).size)
-        if clusters_after < 2:
-            info = dict(info)
-            info.update(
-                {
-                    "merged": False,
-                    "reason": "collapsed_to_one_cluster",
-                    "base_score": float(base_score),
-                    "merged_score": float(merged_score),
-                }
-            )
-            return layers, membership_layers, persistence, selected_layer, info
-        if (
-            np.isfinite(base_score)
-            and base_score > 0
-            and (
-                not np.isfinite(merged_score)
-                or merged_score < base_score * self.fragment_merge_min_score_ratio
-            )
-        ):
-            info = dict(info)
-            info.update(
-                {
-                    "merged": False,
-                    "reason": "score_loss_too_large",
-                    "base_score": float(base_score),
-                    "merged_score": float(merged_score),
-                }
-            )
-            return layers, membership_layers, persistence, selected_layer, info
-
-        info = dict(info)
-        info.update({"base_score": float(base_score), "merged_score": float(merged_score)})
-        layers = list(layers) + [merged_labels]
-        membership_layers = list(membership_layers) + [membership_layers[selected_layer]]
-        persistence = list(persistence) + [np.nan]
-        return layers, membership_layers, persistence, len(layers) - 1, info
-
     # -- API -----------------------------------------------------------------
     def fit(self, X, y=None):
         X = np.ascontiguousarray(X)
@@ -683,20 +500,6 @@ class DiReEVoC:
             persistence,
             sel,
             score,
-        )
-        (
-            layers,
-            membership_layers,
-            persistence,
-            sel,
-            self.fragment_merge_,
-        ) = self._maybe_merge_fragments(
-            self.layout_,
-            layers,
-            membership_layers,
-            persistence,
-            sel,
-            self.reducer_,
         )
         layers, membership_layers, persistence = self._maybe_add_graph_component_layer(
             self.reducer_,

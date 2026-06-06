@@ -36,8 +36,7 @@ distance), `base_min_cluster_size` (EVoC base-layer size, default 5 to match EVo
 `selector` (`"silhouette"` default, `"auto"` for guarded graph-component override,
 `"auto_ensemble"` for the confidence-gated variant, `"silhouette_raw"`, `"base"`, or
 `"none"`), `adaptive_min_samples` (retry density smoothing when a tight layout produces
-mostly noise), `merge_fragments` (merge adjacent selected-layer fragments using DiRe's
-original-space kNN graph), `graph_component_candidates` (make a stable small-k
+mostly noise), `graph_component_candidates` (make a stable small-k
 connected-component layer available to the auto selectors), and `use_gpu` (`"auto"`).
 Extra keywords are forwarded to `dire_rapids.create_dire` (e.g. `n_neighbors`,
 `max_iter_layout`).
