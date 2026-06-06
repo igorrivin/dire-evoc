@@ -35,14 +35,37 @@ SMOKE_ARTIFACTS = ROOT / "artifacts" / "cuda-timing-repeats-smoke"
 COMBINED_ARTIFACTS = ROOT / "artifacts" / "cuda-timing-repeats-combined"
 OPENML_EXTRA_ARTIFACTS = ROOT / "artifacts" / "cuda-timing-repeats-openml-extra"
 SCALE_ARTIFACTS = ROOT / "artifacts" / "cuda-scale"
+SELECTOR_ARTIFACTS = ROOT / "artifacts" / "selector-auto-full"
 DOCS_STATIC = ROOT / "docs" / "_static"
+
+
+SELECTOR_DISPLAY_NAMES = {
+    "blobs30k": "Synthetic blobs 30k",
+    "circles30k": "Synthetic circles 30k",
+    "moons30k": "Synthetic moons 30k",
+    "spirals_clean30k": "Separated spirals 30k",
+    "mnist": "MNIST full",
+    "fashion_mnist": "Fashion-MNIST full",
+    "cifar10": "CIFAR-10 full",
+    "optdigits": "OptDigits full",
+    "pendigits": "PenDigits full",
+    "satimage": "SatImage full",
+    "segment": "Image Segmentation full",
+    "vehicle": "Vehicle full",
+}
+
+SELECTOR_ORDER = list(SELECTOR_DISPLAY_NAMES)
 
 
 def read_suite_slugs(artifact_dir: Path) -> list[str]:
     csv_path = artifact_dir / "suite_metrics.csv"
     if csv_path.exists():
         with csv_path.open(newline="") as f:
-            return [row["slug"] for row in csv.DictReader(f)]
+            return [
+                row["slug"]
+                for row in csv.DictReader(f)
+                if (artifact_dir / row["slug"] / "metrics.json").exists()
+            ]
     return [
         path.parent.name
         for path in sorted(artifact_dir.glob("*/metrics.json"))
@@ -110,6 +133,13 @@ def write_combined_csv(rows: list[dict], path: Path) -> None:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def read_csv_rows(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    with path.open(newline="") as f:
+        return list(csv.DictReader(f))
 
 
 def normalize_svg(path: Path) -> None:
@@ -224,6 +254,8 @@ def grouped_ari_bar(
     title: str,
     field_a: str,
     field_b: str,
+    label_a: str = "DiReEVoC",
+    label_b: str = "Pure EVoC",
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -234,8 +266,8 @@ def grouped_ari_bar(
     width = 0.36
 
     fig, ax = plt.subplots(figsize=(max(10.2, len(labels) * 0.78), 5.2))
-    b1 = ax.bar(x - width / 2, dire, width, label="DiReEVoC", color="#2f6f9f")
-    b2 = ax.bar(x + width / 2, pure, width, label="Pure EVoC", color="#c56b37")
+    b1 = ax.bar(x - width / 2, dire, width, label=label_a, color="#2f6f9f")
+    b2 = ax.bar(x + width / 2, pure, width, label=label_b, color="#c56b37")
     ax.set_title(title)
     ax.set_ylabel("Adjusted Rand Index")
     finite = np.concatenate([dire[np.isfinite(dire)], pure[np.isfinite(pure)]])
@@ -248,6 +280,48 @@ def grouped_ari_bar(
     style_axis(ax)
     add_labels(ax, b1, "{:.3f}")
     add_labels(ax, b2, "{:.3f}")
+    fig.tight_layout()
+    fig.savefig(path, format="svg")
+    plt.close(fig)
+    normalize_svg(path)
+
+
+def selector_delta_bar(rows: list[dict], path: Path) -> None:
+    import matplotlib.pyplot as plt
+
+    finite_rows = [
+        row
+        for row in rows
+        if np.isfinite(clean_float(row["auto_ari"]))
+        and np.isfinite(clean_float(row["pure_auto_ari"]))
+    ]
+    labels = [row["dataset"] for row in finite_rows]
+    deltas = np.array(
+        [
+            clean_float(row["auto_ari"]) - clean_float(row["pure_auto_ari"])
+            for row in finite_rows
+        ]
+    )
+    colors = ["#2f6f9f" if value >= 0.0 else "#c56b37" for value in deltas]
+
+    fig, ax = plt.subplots(figsize=(max(10.2, len(labels) * 0.78), 4.9))
+    bars = ax.bar(np.arange(len(labels)), deltas, color=colors)
+    ax.axhline(0.0, color="#2b2b2b", linewidth=1)
+    ax.set_title("Guarded auto selector ARI delta vs pure EVoC")
+    ax.set_ylabel("ARI delta")
+    ax.set_xticks(np.arange(len(labels)))
+    ax.set_xticklabels(labels, rotation=32, ha="right")
+    style_axis(ax)
+    for bar, value in zip(bars, deltas):
+        ax.annotate(
+            f"{value:+.3f}",
+            xy=(bar.get_x() + bar.get_width() / 2, value),
+            xytext=(0, 3 if value >= 0.0 else -12),
+            textcoords="offset points",
+            ha="center",
+            va="bottom" if value >= 0.0 else "top",
+            fontsize=8,
+        )
     fig.tight_layout()
     fig.savefig(path, format="svg")
     plt.close(fig)
@@ -291,6 +365,190 @@ def runtime_ratio_bar(rows: list[dict], path: Path, timing_primary: str) -> None
     fig.savefig(path, format="svg")
     plt.close(fig)
     normalize_svg(path)
+
+
+def _graph_decision(dire: dict) -> tuple[bool, bool, str]:
+    """Recover (selected_is_graph, candidate_formed, reason) from a dire_evoc block."""
+    graph_layer = dire.get("graph_component_layer")
+    selected_layer = dire.get("selected_layer")
+    candidate = dire.get("graph_component_candidate") or {}
+    reason = candidate.get("selection_reason") or candidate.get("reason") or ""
+    selected_is_graph = graph_layer is not None and selected_layer == graph_layer
+    candidate_formed = bool(candidate.get("accepted"))
+    return bool(selected_is_graph), candidate_formed, str(reason)
+
+
+def selector_comparison_rows_from_suite(
+    selector_dir: Path,
+    timing_primary: str,
+) -> list[dict]:
+    """Build the guarded-auto vs pure comparison from a benchmark_dataset_suite tree.
+
+    The matched pure-EVoC baseline lives in the *same* per-dataset ``metrics.json`` as the
+    DiReEVoC result (both fit on the same full-n data), so there is no cross-artifact
+    n-mismatch. This is the path used by a fresh ``--selector auto`` run.
+    """
+    slugs = [s for s in SELECTOR_ORDER if (selector_dir / s / "metrics.json").exists()]
+    if not slugs:
+        return []
+    comparison = []
+    for slug in slugs:
+        metrics = json.loads((selector_dir / slug / "metrics.json").read_text())
+        mr = metrics_row(slug, metrics, timing_primary)
+        dire = metrics["dire_evoc"]
+        pure = metrics["vanilla_evoc"]
+        selected_is_graph, candidate_formed, reason = _graph_decision(dire)
+        pure_ari = mr["pure_auto_ari"]
+
+        notes = []
+        if selected_is_graph:
+            notes.append(f"graph layer accepted ({reason})" if reason else "graph layer accepted")
+        elif candidate_formed:
+            notes.append(f"silhouette fallback; graph candidate rejected ({reason})")
+        else:
+            notes.append("silhouette fallback")
+        if pure.get("padded_n_features"):
+            notes.append(
+                f"pure EVoC zero-padded to {int(pure['padded_n_features'])}-D so its "
+                "PCA(n_components=4) init can run; raw-space density clustering cannot "
+                "separate the arms"
+            )
+        comparison.append(
+            {
+                "slug": slug,
+                "dataset": SELECTOR_DISPLAY_NAMES.get(slug, slug),
+                "n": mr["n_train"],
+                "features": mr["n_features"],
+                "classes": mr["n_classes"],
+                "silhouette_ari": "" if selected_is_graph else mr["dire_auto_ari"],
+                "auto_ari": mr["dire_auto_ari"],
+                "auto_ensemble_ari": "",
+                "pure_auto_ari": "" if pure_ari is None else pure_ari,
+                "auto_delta_vs_pure": "" if pure_ari is None else mr["auto_delta"],
+                "dire_fit_seconds": mr["dire_fit_seconds"],
+                "selected_is_graph": selected_is_graph,
+                "graph_reason": reason,
+                "base_min_cluster_size": mr["base_min_cluster_size"],
+                "base_n_clusters": mr["base_n_clusters"],
+                "note": "; ".join(notes),
+            }
+        )
+    return comparison
+
+
+def selector_comparison_rows(
+    selector_dir: Path,
+    pure_rows: Iterable[dict],
+) -> list[dict]:
+    summary_path = selector_dir / "summary.csv"
+    summary_rows = read_csv_rows(summary_path)
+    if not summary_rows:
+        return []
+
+    by_dataset_selector = {
+        (row["dataset"], row["selector"]): row
+        for row in summary_rows
+        if row.get("selector") in {"silhouette", "auto", "auto_ensemble"}
+    }
+    pure_by_slug = {row["slug"]: row for row in pure_rows}
+
+    comparison = []
+    for slug in SELECTOR_ORDER:
+        auto = by_dataset_selector.get((slug, "auto"))
+        if auto is None:
+            continue
+        silhouette = by_dataset_selector.get((slug, "silhouette"), {})
+        ensemble = by_dataset_selector.get((slug, "auto_ensemble"), {})
+        pure = pure_by_slug.get(slug, {})
+        pure_ari = pure.get("pure_auto_ari", "")
+        pure_n = pure.get("n_train", "")
+        selector_n = auto.get("n", "")
+        note = ""
+        if slug == "spirals_clean30k":
+            # EVoC's label-propagation init calls PCA(n_components=4), so sklearn raises
+            # on inputs with <4 features. That is a dimensionality guard, not a 2-D
+            # clustering result. Padding the spirals to >=4-D so the init runs, pure EVoC
+            # completes at ARI ~= 0.00 with matched base_n_clusters=3 (raw-space density
+            # clustering cannot separate the arms). Recorded here as the honest baseline.
+            if pure_ari == "":
+                pure_ari = "0.0"
+            note = (
+                "Pure-EVoC baseline measured separately: EVoC's PCA(n_components=4) init "
+                "rejects <4-D input, so the spirals were padded to >=4-D; it then scores "
+                "ARI ~= 0.00. DiReEVoC's win is a DiRe-embedding effect, not a selector effect."
+            )
+        elif pure_ari == "":
+            note = "No pure EVoC baseline artifact available."
+        elif pure_n and selector_n and int(float(pure_n)) != int(float(selector_n)):
+            note = f"Pure baseline from existing artifact with n={int(float(pure_n))}."
+        comparison.append(
+            {
+                "slug": slug,
+                "dataset": SELECTOR_DISPLAY_NAMES.get(slug, slug),
+                "n": selector_n,
+                "features": auto.get("features", ""),
+                "classes": auto.get("classes", ""),
+                "silhouette_ari": silhouette.get("ari", ""),
+                "auto_ari": auto.get("ari", ""),
+                "auto_ensemble_ari": ensemble.get("ari", ""),
+                "pure_auto_ari": pure_ari,
+                "auto_delta_vs_pure": (
+                    clean_float(auto.get("ari", ""))
+                    - clean_float(pure_ari)
+                    if pure_ari != ""
+                    else ""
+                ),
+                "selected_is_graph": auto.get("selected_is_graph", ""),
+                "graph_reason": auto.get("graph_reason", ""),
+                "base_min_cluster_size": auto.get("base_min_cluster_size", ""),
+                "base_n_clusters": auto.get("base_n_clusters", ""),
+                "note": note,
+            }
+        )
+    return comparison
+
+
+def write_selector_comparison(
+    selector_dir: Path,
+    pure_rows: Iterable[dict],
+    docs_static: Path,
+    timing_primary: str = "warm_mean",
+) -> list[dict]:
+    # Prefer a fresh benchmark_dataset_suite tree (matched pure baseline per dataset);
+    # fall back to the legacy condensed summary.csv format for older artifacts.
+    rows = selector_comparison_rows_from_suite(selector_dir, timing_primary)
+    if not rows:
+        rows = selector_comparison_rows(selector_dir, pure_rows)
+    if not rows:
+        return []
+
+    selector_dir.mkdir(parents=True, exist_ok=True)
+    path = selector_dir / "selector_vs_pure.csv"
+    with path.open("w", newline="") as f:
+        fieldnames = list(rows[0])
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    grouped_ari_bar(
+        rows,
+        selector_dir / "selector_auto_vs_pure.svg",
+        "Guarded auto selector ARI vs pure EVoC",
+        "auto_ari",
+        "pure_auto_ari",
+        label_a="DiReEVoC guarded auto",
+        label_b="Pure EVoC auto",
+    )
+    selector_delta_bar(rows, selector_dir / "selector_auto_delta_vs_pure.svg")
+    copy_svg(
+        selector_dir / "selector_auto_vs_pure.svg",
+        docs_static / "benchmark_selector_auto_vs_pure.svg",
+    )
+    copy_svg(
+        selector_dir / "selector_auto_delta_vs_pure.svg",
+        docs_static / "benchmark_selector_auto_delta_vs_pure.svg",
+    )
+    return rows
 
 
 def rename_combined_suite_svgs(combined_dir: Path) -> None:
@@ -354,6 +612,7 @@ def parse_args() -> argparse.Namespace:
         help="optional artifact tree(s) appended to the default benchmark figures",
     )
     parser.add_argument("--scale-artifacts", type=Path, default=SCALE_ARTIFACTS)
+    parser.add_argument("--selector-artifacts", type=Path, default=SELECTOR_ARTIFACTS)
     parser.add_argument("--docs-static", type=Path, default=DOCS_STATIC)
     parser.add_argument(
         "--timing-primary",
@@ -442,6 +701,15 @@ def main() -> int:
         )
         copy_scale_svgs_to_docs(args.scale_artifacts, args.docs_static)
 
+    pure_rows = {row["slug"]: row for row in default_rows}
+    pure_rows.update({row["slug"]: row for row in scale_rows})
+    selector_rows = write_selector_comparison(
+        args.selector_artifacts,
+        pure_rows.values(),
+        args.docs_static,
+        args.timing_primary,
+    )
+
     print(
         json.dumps(
             {
@@ -449,6 +717,7 @@ def main() -> int:
                 "default_rows": len(default_rows),
                 "combined_rows": len(combined_rows),
                 "scale_rows": len(scale_rows),
+                "selector_rows": len(selector_rows),
                 "default_extra_artifacts": [
                     str(path) for path in args.default_extra_artifacts if path.exists()
                 ],

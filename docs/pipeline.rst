@@ -5,7 +5,7 @@ DiReEVoC Pipeline
 
 1. DiRe-RAPIDS layout construction in ``n_components`` dimensions.
 2. EVoC density clustering on that layout.
-3. Layer selection by coverage-weighted silhouette.
+3. Layer selection by the configured selector.
 4. Intrinsic-dimension estimation from DiRe's existing kNN graph.
 5. Optional prediction for new embeddings using a kNN vote in the original space.
 
@@ -58,10 +58,25 @@ multiplies by coverage, treating noise as a zero-silhouette contribution. This a
 failure mode where a layer discards many difficult points as noise and receives an
 artificially high plain silhouette score.
 
+The opt-in ``"auto"`` selector can append one extra candidate layer from DiRe's stored
+kNN graph. It sweeps neighbour counts around ``ceil(intrinsic_dimension) + 1`` and keeps
+a connected-component labelling only when adjacent k values agree and every component is
+at least ``base_min_cluster_size``. That graph candidate overrides the EVoC layer only
+when it matches an explicit ``base_n_clusters`` control or passes fragmentation guards.
+
 Available selectors:
 
 ``"silhouette"``
-   Coverage-weighted silhouette. This is the default.
+   Coverage-weighted silhouette over EVoC layers. This is the default.
+
+``"auto"``
+   Coverage-weighted silhouette fallback plus the guarded DiRe-layout graph-component
+   candidate.
+
+``"auto_ensemble"``
+   Like ``"auto"``, but records silhouette, graph, and combined confidence scores and
+   accepts the graph candidate only when graph confidence is at least the silhouette
+   confidence.
 
 ``"silhouette_raw"``
    Plain silhouette over clustered points only.

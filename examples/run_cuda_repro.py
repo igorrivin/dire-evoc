@@ -78,6 +78,21 @@ def dataset_suite_command(args: argparse.Namespace, output_dir: Path) -> list[st
         "--selector",
         args.selector,
     ]
+    command.append(
+        "--graph-component-candidates"
+        if args.graph_component_candidates
+        else "--no-graph-component-candidates"
+    )
+    command.extend(
+        [
+            "--graph-component-min-stability",
+            str(args.graph_component_min_stability),
+            "--graph-component-k-radius",
+            str(args.graph_component_k_radius),
+            "--graph-component-min-cluster-ratio",
+            str(args.graph_component_min_cluster_ratio),
+        ]
+    )
     if args.base_min_cluster_size is not None:
         command.extend(["--base-min-cluster-size", str(args.base_min_cluster_size)])
     if args.base_n_clusters is not None:
@@ -162,7 +177,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--selector",
         default="silhouette",
-        choices=["silhouette", "silhouette_raw", "base", "none"],
+        choices=["silhouette", "auto", "auto_ensemble", "silhouette_raw", "base", "none"],
+    )
+    parser.add_argument(
+        "--graph-component-candidates",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="allow a stable small-k graph-component candidate to override the smoother layer selector",
+    )
+    parser.add_argument(
+        "--graph-component-min-stability",
+        type=float,
+        default=0.95,
+        help="minimum mean pairwise ARI across k=2..radius for the graph-component candidate",
+    )
+    parser.add_argument(
+        "--graph-component-k-radius",
+        type=int,
+        default=4,
+        help="largest small-k neighborhood radius used for graph-component candidate stability",
+    )
+    parser.add_argument(
+        "--graph-component-min-cluster-ratio",
+        type=float,
+        default=1.5,
+        help="minimum candidate cluster-count ratio over the base layer before selecting it",
     )
     parser.add_argument("--skip-fixed-k", action="store_true")
     return parser.parse_args()
@@ -186,6 +225,11 @@ def main() -> int:
         "timing_repeats": int(args.timing_repeats),
         "timing_primary": args.timing_primary,
         "timing_policy": timing_policy(args.timing_repeats, args.timing_primary),
+        "selector": args.selector,
+        "graph_component_candidates": bool(args.graph_component_candidates),
+        "graph_component_min_stability": float(args.graph_component_min_stability),
+        "graph_component_k_radius": int(args.graph_component_k_radius),
+        "graph_component_min_cluster_ratio": float(args.graph_component_min_cluster_ratio),
         "runs": [],
     }
 

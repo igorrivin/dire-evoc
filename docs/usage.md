@@ -33,11 +33,14 @@ labels_new = model.predict(X_new)                          # out-of-sample assig
 Key parameters: `n_components` (layout dim, default 8), `min_samples` (HDBSCAN* core
 distance), `base_min_cluster_size` (EVoC base-layer size, default 5 to match EVoC),
 `base_n_clusters` (optional target base-layer cluster count for controlled benchmarks),
-`selector` (`"silhouette"` default — the validated layer selector — or `"base"` for the
-finest layer), `adaptive_min_samples` (retry density smoothing when a tight layout
-produces mostly noise), `merge_fragments` (merge adjacent selected-layer fragments using
-DiRe's original-space kNN graph), and `use_gpu` (`"auto"`). Extra keywords are forwarded
-to `dire_rapids.create_dire` (e.g. `n_neighbors`, `max_iter_layout`).
+`selector` (`"silhouette"` default, `"auto"` for guarded graph-component override,
+`"auto_ensemble"` for the confidence-gated variant, `"silhouette_raw"`, `"base"`, or
+`"none"`), `adaptive_min_samples` (retry density smoothing when a tight layout produces
+mostly noise), `merge_fragments` (merge adjacent selected-layer fragments using DiRe's
+original-space kNN graph), `graph_component_candidates` (make a stable small-k
+connected-component layer available to the auto selectors), and `use_gpu` (`"auto"`).
+Extra keywords are forwarded to `dire_rapids.create_dire` (e.g. `n_neighbors`,
+`max_iter_layout`).
 
 > **When is the partition the right object?** Density clustering assumes density-separated
 > structure. On continuous / high-noise manifolds a hard partition is the wrong object —

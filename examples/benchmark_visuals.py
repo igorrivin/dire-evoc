@@ -209,16 +209,31 @@ def fit_vanilla_evoc(X, y, args):
     """
     from evoc import EVoC
 
+    # EVoC's label-propagation init calls PCA(n_components=4), which scikit-learn rejects
+    # for <4 features. That is a dimensionality guard, not a clustering verdict, so for
+    # very low-dimensional inputs (e.g. the raw 2-D spirals) we zero-pad to 4 columns so
+    # the baseline runs honestly on the same points. Higher-dimensional data is untouched.
+    pad_to = 4
+    X_fit = X
+    padded_to = None
+    if X.shape[1] < pad_to:
+        padded_to = pad_to
+        X_fit = np.hstack(
+            [X, np.zeros((X.shape[0], pad_to - X.shape[1]), dtype=X.dtype)]
+        )
+
     ev, fit_stats = timed_repeated(
         lambda: EVoC(
             min_samples=args.min_samples,
             base_min_cluster_size=args.base_min_cluster_size,
             base_n_clusters=args.base_n_clusters,
             random_state=args.seed,
-        ).fit(X),
+        ).fit(X_fit),
         args.timing_repeats,
     )
     result = evaluate_auto_oracle(ev.labels_, ev.cluster_layers_, y)
+    if padded_to is not None:
+        result["padded_n_features"] = int(padded_to)
     result["fit_seconds"] = timing_primary_value(fit_stats, args)
     result["total_seconds"] = timing_primary_value(fit_stats, args)
     result["fit_seconds_mean_all"] = fit_stats["mean_all"]
@@ -241,11 +256,16 @@ def _fit_dire_evoc_profile_once(X_train, y_train, X_test, y_test, args):
 
     model = DiReEVoC(
         n_components=args.n_components,
+        metric=args.metric,
         min_samples=args.min_samples,
         base_min_cluster_size=args.base_min_cluster_size,
         base_n_clusters=args.base_n_clusters,
         use_gpu=args.use_gpu,
         selector=args.selector,
+        graph_component_candidates=args.graph_component_candidates,
+        graph_component_min_stability=args.graph_component_min_stability,
+        graph_component_k_radius=args.graph_component_k_radius,
+        graph_component_min_cluster_ratio=args.graph_component_min_cluster_ratio,
         random_state=args.seed,
         n_neighbors=args.n_neighbors,
         max_iter_layout=args.max_iter_layout,
@@ -300,6 +320,32 @@ def _fit_dire_evoc_profile_once(X_train, y_train, X_test, y_test, args):
             reducer,
         )
     )
+
+    # Guarded graph-component stage, mirroring DiReEVoC.fit() so the profiled "auto"
+    # selector actually exercises the graph override (the per-phase timing breakdown is
+    # why we hand-roll the pipeline instead of calling fit()).
+    (
+        (layers, membership_layers, persistence),
+        phases["graph_component_seconds"],
+    ) = timed(
+        lambda: model._maybe_add_graph_component_layer(
+            reducer, layers, membership_layers, persistence
+        )
+    )
+    if (
+        getattr(model, "graph_component_layer_", None) is not None
+        and args.selector in {"auto", "auto_ensemble"}
+    ):
+        use_graph, graph_info = model._should_select_graph_component_layer(
+            layers[selected_layer],
+            layers[model.graph_component_layer_],
+            silhouette_score=selected_score,
+        )
+        model.graph_component_candidate_ = graph_info
+        if use_graph:
+            selected_layer = model.graph_component_layer_
+            selected_score = model._layer_score(layout, layers[selected_layer])
+
     labels = layers[selected_layer]
 
     try:
@@ -345,6 +391,7 @@ def _fit_dire_evoc_profile_once(X_train, y_train, X_test, y_test, args):
                 + phases["layer_selection_seconds"]
                 + phases["adaptive_smoothing_seconds"]
                 + phases["fragment_merge_seconds"]
+                + phases["graph_component_seconds"]
                 + phases["intrinsic_dimension_seconds"]
                 + phases["prepare_reference_seconds"]
             ),
@@ -354,6 +401,12 @@ def _fit_dire_evoc_profile_once(X_train, y_train, X_test, y_test, args):
             "selected_min_samples": int(selected_min_samples),
             "selected_base_min_cluster_size": int(selected_base_min_cluster_size),
             "fragment_merge": fragment_merge,
+            "graph_component_candidate": to_jsonable(
+                getattr(model, "graph_component_candidate_", None)
+            ),
+            "graph_component_layer": None
+            if getattr(model, "graph_component_layer_", None) is None
+            else int(model.graph_component_layer_),
             "on_gpu": bool(on_gpu),
             "layout_shape": list(layout.shape),
             "intrinsic_dimension": None
@@ -725,10 +778,24 @@ def parse_args():
     )
     p.add_argument("--use-gpu", default="auto", choices=["auto", "true", "false"])
     p.add_argument(
+        "--metric",
+        default="cosine",
+        choices=["cosine", "euclidean"],
+        help="distance metric for the DiRe layout (pure EVoC always uses raw vectors)",
+    )
+    p.add_argument(
         "--selector",
         default="silhouette",
-        choices=["silhouette", "silhouette_raw", "base", "none"],
+        choices=["silhouette", "auto", "auto_ensemble", "silhouette_raw", "base", "none"],
     )
+    p.add_argument(
+        "--graph-component-candidates",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    p.add_argument("--graph-component-min-stability", type=float, default=0.95)
+    p.add_argument("--graph-component-k-radius", type=int, default=4)
+    p.add_argument("--graph-component-min-cluster-ratio", type=float, default=1.5)
     p.add_argument("--skip-fixed-k", action="store_true")
     return p.parse_args()
 
@@ -770,7 +837,17 @@ def main():
         print(f"holdout={X_test.shape}")
 
     print("fitting pure EVoC...")
-    _, vanilla = fit_vanilla_evoc(X_train, y_train, args)
+    try:
+        _, vanilla = fit_vanilla_evoc(X_train, y_train, args)
+    except Exception as exc:  # pure EVoC's PCA(n_components=4) init rejects <4-D input
+        print(f"pure EVoC unavailable on this input: {type(exc).__name__}: {exc}")
+        vanilla = {
+            "auto_ari": None,
+            "oracle_ari": None,
+            "fit_seconds": None,
+            "total_seconds": None,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
     print("profiling DiReEVoC...")
     layout, dire = fit_dire_evoc_profile(X_train, y_train, X_test, y_test, args)
@@ -789,11 +866,19 @@ def main():
             "n_test": 0 if X_test is None else int(X_test.shape[0]),
             "n_features": int(X.shape[1]),
             "n_classes": n_classes,
+            "metric": args.metric,
             "min_samples": int(args.min_samples),
             "base_min_cluster_size": int(args.base_min_cluster_size),
             "base_n_clusters": None
             if args.base_n_clusters is None
             else int(args.base_n_clusters),
+            "selector": args.selector,
+            "graph_component_candidates": bool(args.graph_component_candidates),
+            "graph_component_min_stability": float(args.graph_component_min_stability),
+            "graph_component_k_radius": int(args.graph_component_k_radius),
+            "graph_component_min_cluster_ratio": float(
+                args.graph_component_min_cluster_ratio
+            ),
             "timing_repeats": int(args.timing_repeats),
             "timing_primary": args.timing_primary,
             "timing_policy": timing_policy(args),
@@ -805,15 +890,15 @@ def main():
 
     (output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
     write_csv(metrics, output_dir / "metrics.csv")
-    plot_quality(metrics, output_dir)
-    plot_timings(metrics, output_dir)
-    plot_diagnostics(metrics, output_dir)
+    pure_available = vanilla.get("auto_ari") is not None
+    if pure_available:
+        plot_quality(metrics, output_dir)
+        plot_timings(metrics, output_dir)
+        plot_diagnostics(metrics, output_dir)
 
     print(f"wrote metrics and SVG figures to {output_dir}")
-    print(
-        "auto ARI: "
-        f"DiReEVoC={dire['auto_ari']:.4f}, pure EVoC={vanilla['auto_ari']:.4f}"
-    )
+    pure_str = f"{vanilla['auto_ari']:.4f}" if pure_available else "unavailable"
+    print(f"auto ARI: DiReEVoC={dire['auto_ari']:.4f}, pure EVoC={pure_str}")
     print(
         "intrinsic dimension: "
         f"{dire.get('intrinsic_dimension', None)}; "

@@ -18,6 +18,11 @@ import numpy as np
 
 from .dimension import intrinsic_dimension_from_dire
 from .predict import knn_vote_predict, prepare_reference
+from .selectors import (
+    best_layer as select_best_layer,
+    coverage_silhouette_score,
+    guarded_graph_component_decision,
+)
 
 __all__ = ["DiReEVoC"]
 
@@ -42,23 +47,37 @@ class DiReEVoC:
         Whether to build the single-linkage tree on the GPU (cuML). "auto" uses the GPU
         iff cuML imports. The DiRe layout can still use its own acceleration when this
         is false; this flag controls the EVoC-phase hybrid.
-    selector : {"silhouette", "silhouette_raw", "base", "none"}, default="silhouette"
+    selector : {"silhouette", "auto", "auto_ensemble", "silhouette_raw", "base", "none"}, default="silhouette"
         How to pick the operative layer for ``labels_``. "silhouette" uses
         COVERAGE-WEIGHTED silhouette (mean silhouette over all points, noise scored 0) --
         the validated default; it avoids the over-segmentation that plain silhouette
         suffers when a layer discards much of the data as noise. "silhouette_raw" is the
-        old non-coverage-weighted behaviour; "base" uses the finest layer; "none" the
-        coarsest.
+        old non-coverage-weighted behaviour. "auto" uses the same silhouette fallback
+        plus guarded stable graph-component overrides. "auto_ensemble" additionally
+        records a noisy-or confidence combination and requires graph confidence to beat
+        silhouette confidence. "base" uses the finest layer; "none" the coarsest.
     adaptive_min_samples : bool, default=True
         If the base clustering labels more than ``noise_gate`` of the points as noise --
         the signature of a layout too tight for EVoC's default density smoothing (the
         whole layer set comes out over-fragmented) -- re-cluster at larger ``min_samples``
         and re-select by the same coverage-weighted score, adopting the result only if it
         strictly beats the base. Genuinely diffuse data (continuous manifolds) keeps its
-        honest high-noise result because nothing beats it. Only active for the default
-        "silhouette" selector.
+        honest high-noise result because nothing beats it. Active for the silhouette-based
+        selectors: "silhouette", "auto", and "auto_ensemble".
     noise_gate : float, default=0.5
         Noise fraction above which the adaptive ``min_samples`` search is triggered.
+    graph_component_candidates : bool, default=True
+        If DiRe's stored kNN graph has stable connected components across a small
+        neighbour-count sweep, append that labelling as a candidate auto layer.
+    graph_component_min_stability : float, default=0.95
+        Adjusted-Rand agreement required between adjacent kNN-component labellings.
+    graph_component_k_radius : int, default=4
+        Sweep radius around ``ceil(intrinsic_dimension) + 1`` for the graph-component
+        candidate.
+    graph_component_min_cluster_ratio : float, default=1.5
+        The post-merge EVoC selected layer must have at least this many clusters per
+        graph component before the graph candidate overrides it, unless
+        ``base_n_clusters`` is set and matched.
     n_neighbors_predict : int or None
         Neighbours for the out-of-sample vote; defaults to the DiRe ``n_neighbors``.
     random_state : int or None
@@ -78,6 +97,7 @@ class DiReEVoC:
     selected_min_samples_ : int                min_samples actually used (> min_samples if
                                                the adaptive search escalated it)
     selected_base_min_cluster_size_ : int      base_min_cluster_size actually used
+    graph_component_candidate_ : dict          diagnostics for the graph-component gate
     """
 
     def __init__(self, n_components=8, metric="cosine", min_samples=10,
@@ -87,6 +107,10 @@ class DiReEVoC:
                  merge_fragments=True, fragment_merge_min_edges=3,
                  fragment_merge_edge_fraction=0.01,
                  fragment_merge_min_score_ratio=0.25,
+                 graph_component_candidates=True,
+                 graph_component_min_stability=0.95,
+                 graph_component_k_radius=4,
+                 graph_component_min_cluster_ratio=1.5,
                  gpu_cluster_min_samples=1000,
                  n_neighbors_predict=None, random_state=None, **dire_kwargs):
         self.n_components = n_components
@@ -102,6 +126,10 @@ class DiReEVoC:
         self.fragment_merge_min_edges = fragment_merge_min_edges
         self.fragment_merge_edge_fraction = fragment_merge_edge_fraction
         self.fragment_merge_min_score_ratio = fragment_merge_min_score_ratio
+        self.graph_component_candidates = graph_component_candidates
+        self.graph_component_min_stability = graph_component_min_stability
+        self.graph_component_k_radius = graph_component_k_radius
+        self.graph_component_min_cluster_ratio = graph_component_min_cluster_ratio
         self.gpu_cluster_min_samples = gpu_cluster_min_samples
         self.n_neighbors_predict = n_neighbors_predict
         self.random_state = random_state
@@ -168,33 +196,24 @@ class DiReEVoC:
 
         ``silhouette(clustered) * coverage`` = mean silhouette over all points with noise
         scored 0. Returns -inf for a degenerate layer (<2 clusters among the sample)."""
-        from sklearn.metrics import silhouette_score
-        mask = lab_sample >= 0
-        if np.unique(lab_sample[mask]).size < 2:
-            return -np.inf
-        s = silhouette_score(Xs[mask], lab_sample[mask])
-        if self.selector != "silhouette_raw":
-            s *= mask.mean()
-        return float(s)
+        return coverage_silhouette_score(
+            Xs,
+            lab_sample,
+            raw=self.selector == "silhouette_raw",
+        )
 
     def _best_layer(self, layout, layers):
         """Return (index, score) of the operative layer under the configured selector.
 
         ``score`` is the coverage-weighted silhouette of the chosen layer, used both to
         pick within a layer set and to compare candidate sets across smoothing params."""
-        rng = np.random.default_rng(self.random_state)
-        n = layout.shape[0]
-        sample = (rng.choice(n, 10_000, replace=False) if n > 10_000 else np.arange(n))
-        Xs = layout[sample]
-        if self.selector == "base" or len(layers) == 1:
-            i = 0
-        elif self.selector == "none":
-            i = len(layers) - 1
-        else:
-            scores = [self._layer_score(Xs, lab[sample]) for lab in layers]
-            i = int(np.argmax(scores))
-            return i, scores[i]
-        return i, self._layer_score(Xs, layers[i][sample])
+        i, score, _ = select_best_layer(
+            layout,
+            layers,
+            selector=self.selector,
+            random_state=self.random_state,
+        )
+        return i, score
 
     def _adaptive_smoothing_candidates(self):
         """Smoothing candidates for tight layouts that over-fragment at defaults."""
@@ -217,6 +236,185 @@ class DiReEVoC:
                     seen.add(key)
                     candidates.append(key)
         return candidates
+
+    def _knn_component_labels(self, knn_indices, k):
+        """Connected components of the undirected first-k neighbour graph."""
+        knn_indices = np.asarray(knn_indices)
+        n = knn_indices.shape[0]
+        k = int(min(max(1, k), knn_indices.shape[1]))
+        parent = np.arange(n, dtype=np.int64)
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a, b):
+            ra = find(a)
+            rb = find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        for i in range(n):
+            for j in knn_indices[i, :k]:
+                j = int(j)
+                if 0 <= j < n and j != i:
+                    union(i, j)
+
+        roots = np.array([find(i) for i in range(n)], dtype=np.int64)
+        _, labels = np.unique(roots, return_inverse=True)
+        return labels.astype(np.int64, copy=False)
+
+    def _graph_component_candidate(self, reducer, min_component_size):
+        """Return a stable small-k graph-component labelling, if one exists.
+
+        This targets the case where the DiRe neighbour graph has already separated the
+        data before EVoC's hierarchy/selector sees the right layer. It is deliberately
+        gated by adjacent-k stability and component size so a connected manifold is not
+        split just because one small graph happened to fragment.
+        """
+        if not self.graph_component_candidates:
+            return None, {"enabled": False}
+
+        knn_indices = getattr(reducer, "_knn_indices", None)
+        if knn_indices is None:
+            return None, {"enabled": True, "accepted": False, "reason": "missing_knn"}
+        knn_indices = np.asarray(knn_indices)
+        if knn_indices.ndim != 2 or knn_indices.shape[0] == 0 or knn_indices.shape[1] == 0:
+            return None, {"enabled": True, "accepted": False, "reason": "bad_knn_shape"}
+
+        from sklearn.metrics import adjusted_rand_score
+
+        n = knn_indices.shape[0]
+        max_k = knn_indices.shape[1]
+        try:
+            intrinsic_dim = intrinsic_dimension_from_dire(reducer, method="twonn")
+        except Exception:
+            intrinsic_dim = None
+        center = 3 if intrinsic_dim is None else int(np.ceil(intrinsic_dim)) + 1
+        radius = int(max(0, self.graph_component_k_radius))
+        k_values = [
+            k for k in range(center - radius, center + radius + 1)
+            if 1 <= k <= max_k
+        ]
+        if not k_values:
+            k_values = [min(max(1, center), max_k)]
+
+        records = []
+        by_k = {}
+        for k in sorted(set(k_values)):
+            labels = self._knn_component_labels(knn_indices, k)
+            counts = np.bincount(labels)
+            component_count = int(counts.size)
+            min_size = int(counts.min()) if counts.size else 0
+            large_count = int(np.sum(counts >= min_component_size))
+            valid = (
+                2 <= component_count
+                and component_count < n
+                and min_size >= min_component_size
+            )
+            by_k[k] = labels
+            records.append(
+                {
+                    "k": int(k),
+                    "components": component_count,
+                    "min_size": min_size,
+                    "large_components": large_count,
+                    "valid": bool(valid),
+                }
+            )
+
+        best = None
+        for left, right in zip(records, records[1:]):
+            if not (left["valid"] and right["valid"]):
+                continue
+            stability = float(
+                adjusted_rand_score(by_k[left["k"]], by_k[right["k"]])
+            )
+            if stability < self.graph_component_min_stability:
+                continue
+            labels = by_k[left["k"]]
+            score_key = (
+                stability,
+                -abs(left["k"] - center),
+                -left["components"],
+            )
+            if best is None or score_key > best[0]:
+                best = (
+                    score_key,
+                    labels,
+                    {
+                        "enabled": True,
+                        "accepted": True,
+                        "k": int(left["k"]),
+                        "next_k": int(right["k"]),
+                        "stability": stability,
+                        "components": int(left["components"]),
+                        "min_size": int(left["min_size"]),
+                        "intrinsic_dimension": None
+                        if intrinsic_dim is None
+                        else float(intrinsic_dim),
+                        "records": records,
+                    },
+                )
+
+        if best is None:
+            return None, {
+                "enabled": True,
+                "accepted": False,
+                "reason": "no_stable_large_components",
+                "intrinsic_dimension": None
+                if intrinsic_dim is None
+                else float(intrinsic_dim),
+                "records": records,
+            }
+        return best[1], best[2]
+
+    def _maybe_add_graph_component_layer(
+        self,
+        reducer,
+        layers,
+        membership_layers,
+        persistence,
+    ):
+        labels, info = self._graph_component_candidate(
+            reducer,
+            min_component_size=max(2, int(self.base_min_cluster_size)),
+        )
+        self.graph_component_candidate_ = info
+        self.graph_component_layer_ = None
+        if labels is None:
+            return layers, membership_layers, persistence
+        layers = list(layers) + [labels]
+        membership_layers = list(membership_layers) + [
+            np.ones(labels.shape[0], dtype=np.float32)
+        ]
+        persistence = list(persistence) + [float(info["stability"])]
+        self.graph_component_layer_ = len(layers) - 1
+        return layers, membership_layers, persistence
+
+    def _should_select_graph_component_layer(
+        self,
+        evoc_labels,
+        graph_labels,
+        silhouette_score=None,
+    ):
+        """Choose the graph candidate only when it fixes clear EVoC fragmentation."""
+        decision = guarded_graph_component_decision(
+            evoc_labels=evoc_labels,
+            graph_labels=graph_labels,
+            graph_info=getattr(self, "graph_component_candidate_", {}) or {},
+            base_n_clusters=self.base_n_clusters,
+            min_cluster_ratio=self.graph_component_min_cluster_ratio,
+            policy=(
+                "auto_ensemble"
+                if self.selector == "auto_ensemble"
+                else "guarded_override"
+            ),
+            silhouette_score=silhouette_score,
+        )
+        return decision.selected, decision.diagnostics
 
     def _maybe_adapt_smoothing(
         self,
@@ -241,7 +439,7 @@ class DiReEVoC:
         selected_base_min_cluster_size = self.base_min_cluster_size
         if not (
             self.adaptive_min_samples
-            and self.selector == "silhouette"
+            and self.selector in {"silhouette", "auto", "auto_ensemble"}
             and (layers[0] < 0).mean() > self.noise_gate
         ):
             return (
@@ -395,10 +593,18 @@ class DiReEVoC:
         selected_layer,
         reducer,
     ):
-        if not (self.merge_fragments and self.selector == "silhouette"):
+        if not (
+            self.merge_fragments
+            and self.selector in {"silhouette", "auto", "auto_ensemble"}
+        ):
             return layers, membership_layers, persistence, selected_layer, {
                 "merged": False,
                 "reason": "disabled",
+            }
+        if selected_layer == getattr(self, "graph_component_layer_", None):
+            return layers, membership_layers, persistence, selected_layer, {
+                "merged": False,
+                "reason": "graph_component_layer",
             }
 
         merged_labels, info = self._fragment_merge_labels(
@@ -452,6 +658,12 @@ class DiReEVoC:
     def fit(self, X, y=None):
         X = np.ascontiguousarray(X)
         on_gpu = self._resolve_gpu()
+        self.graph_component_layer_ = None
+        self.graph_component_candidate_ = {
+            "enabled": bool(self.graph_component_candidates),
+            "accepted": False,
+            "reason": "not_evaluated",
+        }
         self.layout_, self.reducer_ = self._build_layout(X)
         layers, membership_layers, persistence = self._cluster(self.layout_, on_gpu)
         sel, score = self._best_layer(self.layout_, layers)
@@ -486,6 +698,25 @@ class DiReEVoC:
             sel,
             self.reducer_,
         )
+        layers, membership_layers, persistence = self._maybe_add_graph_component_layer(
+            self.reducer_,
+            layers,
+            membership_layers,
+            persistence,
+        )
+        if (
+            getattr(self, "graph_component_layer_", None) is not None
+            and self.selector in {"auto", "auto_ensemble"}
+        ):
+            use_graph, graph_info = self._should_select_graph_component_layer(
+                layers[sel],
+                layers[self.graph_component_layer_],
+                silhouette_score=score,
+            )
+            self.graph_component_candidate_ = graph_info
+            if use_graph:
+                sel = self.graph_component_layer_
+                score = self._layer_score(self.layout_, layers[sel])
 
         self.cluster_layers_ = layers
         self.membership_strength_layers_ = membership_layers

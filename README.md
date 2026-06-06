@@ -68,104 +68,104 @@ query = prepare_reference(X_new)
 labels, membership = knn_vote_predict(query, reference, train_labels, n_neighbors=15)
 ```
 
-## When It Helps
+## Results: guarded graph-component selector
 
-The strongest use case is medium-to-large embedding data where density-separated
-structure is present and the DiRe layout is a better clustering substrate than the raw
-vectors. The table below is from the checked CUDA Docker repro on an NVIDIA A10, using
-the same dataset-specific EVoC `base_min_cluster_size` and `base_n_clusters` controls
-for DiReEVoC and pure EVoC; see `docs/benchmarks.md` and the local
-`artifacts/cuda-timing-repeats-default/` plus
-`artifacts/cuda-timing-repeats-openml-extra/` artifact trees. Timings are 20-run warm
-means with the first run discarded; first-run and first-included means are recorded
-separately in the metrics and alternate runtime figures.
+The selector branch adds an opt-in guarded graph-component selector
+(`selector="auto"`). It keeps coverage-weighted silhouette as the fallback, then accepts
+a stable small-k connected-component layer from the DiRe layout graph only when it matches
+an explicit `base_n_clusters` control or passes fragmentation guards. The numbers below
+are one matched, full-`n` sweep on an NVIDIA A10 (`artifacts/selector-auto-full/`,
+`timing_policy=single_run`): for every dataset, DiReEVoC and pure EVoC are fit on the
+*same data* with the same EVoC `base_min_cluster_size`/`base_n_clusters` controls, so the
+deltas are strictly matched — no cross-`n` borrowing.
 
-![CUDA auto ARI comparison](docs/_static/benchmark_auto_ari.svg)
+`ARI delta` is DiReEVoC guarded-auto minus pure EVoC auto. `Fit` is the full
+`selector="auto"` DiReEVoC pipeline (DiRe layout + EVoC + layer post-processing); see the
+timing discussion below for why that is not directly comparable to pure EVoC's seconds.
 
-![CUDA auto ARI delta](docs/_static/benchmark_auto_delta.svg)
+![Guarded auto selector ARI](docs/_static/benchmark_selector_auto_vs_pure.svg)
 
-![CUDA fit runtime comparison](docs/_static/benchmark_fit_seconds.svg)
+![Guarded auto selector ARI delta](docs/_static/benchmark_selector_auto_delta_vs_pure.svg)
 
-| Dataset | DiReEVoC auto ARI | Pure EVoC auto ARI | Notes |
-| --- | ---: | ---: | --- |
-| Synthetic blobs 12k | 0.968 | 1.000 | Matched `base_min_cluster_size=100` |
-| Synthetic moons 12k | 1.000 | 1.000 | Matched `base_min_cluster_size=100`, `base_n_clusters=2` |
-| Synthetic circles 12k | 1.000 | 1.000 | Matched `base_min_cluster_size=100`, `base_n_clusters=2` |
-| MNIST | 0.720 | 0.813 | Pure EVoC wins in this 24k HF-backed run |
-| sklearn digits | 0.261 | 0.305 | Small image data; fixed-k favors Pure EVoC |
-| sklearn iris | 0.562 | 0.236 | DiReEVoC auto win; fixed-k is close |
-| sklearn wine | 0.465 | 0.121 | DiReEVoC auto win in this tuned run |
-| sklearn breast cancer | 0.404 | 0.116 | DiReEVoC win; fixed-k is stronger |
-| Fashion-MNIST | 0.440 | 0.390 | DiReEVoC win; stronger at fixed-k |
-| DBpedia-14 BGE-small | 0.607 | 0.623 | Pure EVoC slightly wins in this 39.2k run |
-| Olivetti faces | 0.022 | 0.063 | Tiny data; both poor |
-| Forest CoverType | 0.016 | -0.026 | DiReEVoC slight win; both poor |
-| CIFAR-10 | 0.029 | 0.012 | 30k images, average-pooled to 16x16 RGB (`d=768`) |
-| OptDigits | 0.848 | 0.147 | DiReEVoC strong auto win; pure EVoC stronger at fixed-k |
-| PenDigits | 0.738 | 0.125 | DiReEVoC strong auto win |
-| SatImage | 0.495 | 0.507 | Pure EVoC slight auto win; DiReEVoC stronger at fixed-k |
-| Image Segmentation | 0.179 | 0.135 | DiReEVoC modest auto win; much stronger at fixed-k |
-| Vehicle | 0.064 | 0.077 | Tiny tabular data; both poor |
+| Dataset | n | DiReEVoC auto ARI | Pure EVoC auto ARI | ARI delta | DiReEVoC fit | Notes |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Synthetic blobs 30k | 30,000 | 1.000 | 1.000 | +0.000 | 30.1s | silhouette fallback |
+| Synthetic circles 30k | 30,000 | 1.000 | 1.000 | +0.000 | 9.9s | graph layer accepted (matches `base_n_clusters=2`) |
+| Synthetic moons 30k | 30,000 | 1.000 | 1.000 | +0.000 | 12.9s | graph layer accepted (matches `base_n_clusters=2`) |
+| Separated spirals 30k | 30,000 | 1.000 | ≈0.00 | ≈+1.00 | 18.8s | graph layer accepted (matches `base_n_clusters=3`); pure EVoC zero-padded to 4-D to run, see below |
+| MNIST full | 70,000 | 0.883 | 0.892 | −0.009 | 113.7s | silhouette fallback |
+| Fashion-MNIST full | 70,000 | 0.385 | 0.327 | +0.057 | 97.9s | silhouette fallback |
+| CIFAR-10 full | 60,000 | 0.029 | 0.009 | +0.020 | 37.7s | silhouette fallback |
+| OptDigits full | 5,620 | 0.823 | 0.184 | +0.639 | 22.8s | silhouette fallback |
+| PenDigits full | 10,992 | 0.716 | 0.155 | +0.561 | 35.7s | silhouette fallback; graph candidate rejected (`too_few_graph_clusters_without_base_n_clusters`) |
+| SatImage full | 6,430 | 0.596 | 0.359 | +0.237 | 24.7s | silhouette fallback |
+| Image Segmentation full | 2,310 | 0.515 | 0.094 | +0.421 | 14.7s | silhouette fallback |
+| Vehicle full | 846 | 0.110 | 0.108 | +0.001 | 12.3s | silhouette fallback; graph candidate rejected (`too_few_graph_clusters_without_base_n_clusters`) |
 
-Runtime from the same CUDA run:
+What the guarded selector actually does in this sweep: it accepts the graph-component
+layer only on circles/moons/spirals, where a stable small-`k` component structure matches
+the supplied `base_n_clusters`. On PenDigits and Vehicle it forms a candidate but the guard
+rejects it (`too_few_graph_clusters_without_base_n_clusters`); everywhere else no stable
+large-component candidate forms and it falls back to coverage-weighted silhouette. So the
+selector is conservative by design — most real-data wins here come from the DiRe layout
+itself, not the graph override. Timings are single-run (`timing_repeats=1`), so expect
+run-to-run variance on the GPU pipeline.
 
-| Dataset | DiReEVoC fit | Pure EVoC fit |
+### The "Separated spirals" row, honestly
+
+Earlier drafts reported the spirals pure-EVoC entry as `n/a — PCA initializer rejects
+exact 2-D input`. That is misleading. EVoC's label-propagation initializer calls
+`PCA(n_components=4)`, so scikit-learn raises `ValueError: n_components=4 must be between 0
+and min(n_samples, n_features)` on *any* input with fewer than 4 features. It is a
+dimensionality guard, not a verdict about clustering 2-D data.
+
+The benchmark now zero-pads the same spirals to 4-D so the initializer runs, and pure EVoC
+completes with the matched `base_n_clusters=3` scoring **ARI ≈ 0.00** (0.0003 in this run)
+— raw-space density clustering cannot separate the interleaved spiral arms regardless of
+dimension. DiReEVoC reaches ARI 1.000 because the DiRe layout untangles the arms before
+EVoC sees them. So the real delta is ≈ **+1.00**, a genuine win — but it is a
+*DiRe-embedding* effect on a 2-D toy, not an EVoC limitation. (The graph override is also
+accepted here because the three arms form a clean small-`k` component structure matching
+`base_n_clusters=3`, but silhouette on the same layout already recovers them.)
+
+### Timing — DiRe also embeds, so the seconds are not apples-to-apples
+
+Pure EVoC clusters the raw vectors directly; DiReEVoC first builds a DiRe layout and then
+clusters that, so its fit time includes work pure EVoC never does. Per-phase timings from
+this sweep make the split concrete (MNIST full, one fit):
+
+| Phase | DiReEVoC | Pure EVoC |
 | --- | ---: | ---: |
-| Synthetic blobs 12k | 3.03s | 0.15s |
-| Synthetic moons 12k | 1.43s | 0.15s |
-| Synthetic circles 12k | 1.44s | 0.15s |
-| MNIST | 20.37s | 0.59s |
-| sklearn digits | 2.71s | 0.07s |
-| sklearn iris | 0.20s | 0.06s |
-| sklearn wine | 0.21s | 0.06s |
-| sklearn breast cancer | 0.62s | 0.06s |
-| Fashion-MNIST | 23.13s | 0.62s |
-| DBpedia-14 BGE-small | 15.45s | 0.65s |
-| Olivetti faces | 0.56s | 0.19s |
-| Forest CoverType | 15.84s | 0.47s |
-| CIFAR-10 | 14.87s | 0.60s |
-| OptDigits | 6.00s | 0.11s |
-| PenDigits | 12.29s | 0.15s |
-| SatImage | 6.58s | 0.11s |
-| Image Segmentation | 0.57s | 0.08s |
-| Vehicle | 0.25s | 0.06s |
+| DiRe layout (embedding) | 15.9s | — |
+| EVoC clustering | 1.4s | 3.0s (whole fit) |
+| Layer selection | 1.3s | — |
+| Adaptive smoothing | 24.4s | — |
+| Fragment merge | 58.7s | — |
+| Graph-component stage | 11.7s | — |
+| **Total fit** | **113.7s** | **3.0s** |
 
-![CUDA fit runtime ratio](docs/_static/benchmark_fit_ratio.svg)
+Two things follow. First, the embedding is a real, irreducible cost that pure EVoC does
+not pay (~16s here, ~14% of the fit) — but it is also what buys the quality on hard
+manifolds and yields a reusable layout for visualization and out-of-sample prediction.
+Second, on large data most of DiReEVoC's wall time is not the embedding at all but the
+DiRe-specific layer post-processing (adaptive smoothing + fragment merge ≈ 83s here). Pure
+EVoC's ~3s fits are the right baseline to keep in mind: DiReEVoC is the much slower method
+and only earns its cost where the layout is a materially better substrate than the raw
+vectors (e.g. OptDigits/PenDigits/Segment, where the matched delta is large).
 
-A separate full-scale sweep uses one fit per dataset, full train+test image corpora where
-available, and the same matched EVoC controls. The completed CUDA artifact tree is
-`artifacts/scale-163-192-62-0/`; `timing_policy` is `single_run`.
+### The honest boundary
 
-![CUDA scale auto ARI comparison](docs/_static/benchmark_scale_auto_ari.svg)
-
-![CUDA scale fit runtime comparison](docs/_static/benchmark_scale_fit_seconds.svg)
-
-| Scale dataset | n train | DiReEVoC auto ARI | Pure EVoC auto ARI | DiReEVoC fit | Pure EVoC fit |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Synthetic blobs 30k | 30,000 | 1.000 | 1.000 | 9.50s | 12.09s |
-| Synthetic moons 30k | 30,000 | 1.000 | 1.000 | 6.40s | 0.48s |
-| Synthetic circles 30k | 30,000 | 1.000 | 1.000 | 6.06s | 0.49s |
-| MNIST full | 70,000 | 0.884 | 0.892 | 64.47s | 1.78s |
-| Fashion-MNIST full | 70,000 | 0.384 | 0.327 | 56.68s | 1.81s |
-| CIFAR-10 full | 60,000 | 0.029 | 0.009 | 23.08s | 1.65s |
-| DBpedia-14 BGE-small full | 560,000 | 0.454 | 0.492 | 1,636.04s | 13.09s |
-| Forest CoverType full | 581,012 | 0.007 | -0.014 | 465.55s | 8.11s |
-| Olivetti faces full | 400 | 0.056 | 0.057 | 7.36s | 0.33s |
-| Wiki-CS full | 11,701 | 0.203 | 0.140 | 17.47s | 11.74s |
-| OGBN-Arxiv full | 169,343 | 0.007 | 0.016 | 57.21s | 2.73s |
-
-The honest boundary:
-
-- This is not a universal clustering-quality win.
+- This is not a universal clustering-quality win. MNIST still favors pure EVoC, and
+  blobs/circles/moons are ties at ≈1.0.
 - DiRe is data-hungry; tiny datasets and weak feature representations are poor fits.
-- Layer selection is still a real failure mode. The tuned run makes moons/circles
-  feasible by setting the known two-cluster base layer for both methods, but MNIST,
-  digits, Fashion-MNIST, DBpedia, Olivetti, CoverType, SatImage, Segment, and Vehicle
-  still expose selector and substrate limits.
+- The guarded graph override is conservative: in this sweep it fires only on the
+  synthetic sets with an explicit `base_n_clusters`; on real data it almost always defers
+  to silhouette. The real-data deltas are DiRe-layout effects, not graph-selector effects.
 - A hard partition is often the wrong object on continuous manifolds. In that case,
   inspect the layout and intrinsic dimension before trusting cluster labels.
-- The GPU Phase-2 speedup is regime-dependent. It helps at large `n` and low CPU core
-  count, but the CPU path can win on small data or many-core machines.
+- DiReEVoC is the heavier method. Pure EVoC clusters raw vectors in ≈3s on these sets;
+  DiReEVoC only repays its embedding + post-processing cost when the layout genuinely
+  separates structure the raw space does not.
 
 ## Installation
 
@@ -202,102 +202,21 @@ Run the bundled smoke example in an environment with the GPU stack installed:
 python examples/quickstart.py
 ```
 
-Generate a reproducible local benchmark/profile bundle with metrics and SVG figures:
-
-```bash
-python examples/benchmark_visuals.py --synthetic-blobs --n-samples 12000 \
-  --test-fraction 0.2 --output-dir artifacts/benchmark-visuals
-```
-
-The visual benchmark example writes `metrics.json`, `metrics.csv`, `quality_ari.svg`,
-`timing_breakdown.svg`, and `diagnostics.svg`. It reports DiReEVoC versus pure EVoC,
-phase timings, intrinsic dimension from DiRe's existing kNN graph, selected-layer noise,
-cluster counts, and optional hold-out prediction metrics.
-
-Run the synthetic smoke suite, or run the broader default suite against the same pure
-EVoC baseline:
-
-```bash
-python examples/benchmark_dataset_suite.py --list-datasets
-python examples/benchmark_dataset_suite.py --datasets smoke \
-  --output-dir artifacts/smoke-suite --timing-repeats 20
-python examples/benchmark_dataset_suite.py --datasets default \
-  --output-dir artifacts/dataset-suite --test-fraction 0.2 --timing-repeats 20
-```
-
-The `smoke` preset is only synthetic blobs, moons, and circles. The `default` suite keeps
-those same three synthetic examples at the front of the larger reproducibility run, then
-adds sklearn digits, iris, wine, breast cancer, MNIST, Fashion-MNIST, DBpedia-14
-embeddings, Olivetti faces, Forest CoverType, CIFAR-10, OptDigits, PenDigits, SatImage,
-Image Segmentation, and Vehicle. CIFAR-10 is average-pooled to 16x16 RGB features for
-this benchmark so it stays on the DiRe cuVS kNN path. Timing
-summaries use warm means in `fit_seconds` by default, while `fit_seconds_first`,
-`fit_seconds_mean_all`, and `fit_seconds_warm_mean` are also written. Rebuild the
-README/Sphinx figures from local artifacts with `python scripts/plot_benchmark_metrics.py`.
-OpenML is tried first by default. If OpenML fails, datasets that
-are fully available in sklearn use the sklearn fallback first, as Forest CoverType does
-through `fetch_covtype`; other mirrored OpenML datasets fall back to Hugging Face
-(`ylecun/mnist`, `zalando-datasets/fashion_mnist`, or `uoft-cs/cifar10`).
-USPS, SVHN, UMIST faces, and Letter remain available by explicit slug.
-Optional graph-feature datasets include Wiki-CS and OGBN-Arxiv when their extra loaders
-are installed.
-
-The default DiRe layout dimension is `n_components=8`. To check whether a smaller
-layout is enough, and to tune EVoC controls without rebuilding DiRe for every trial, use
-the cached-layout tuner. It builds one DiRe layout per value in `--n-components-grid`,
-then sweeps EVoC-side controls on the cached layout:
-
-```bash
-python examples/benchmark_cached_layout_tuning.py \
-  --npz artifacts/cuda/datasets/fashion_mnist.npz \
-  --label Fashion-MNIST \
-  --output-dir artifacts/cached-layout/fashion_mnist \
-  --n-components-grid 4,8 \
-  --base-min-cluster-size-grid 25,50,100 \
-  --base-n-clusters-grid none,classes
-```
-
-The tuner writes `metrics.json` and `trials.csv`; compare `dire_layout_seconds`,
-`cached_trial_seconds`, `full_once_seconds`, and ARI columns to separate layout cost from
-EVoC tuning cost.
-
-The full-scale timing hypothesis is different from the 20-run default suite: small
-datasets favor pure EVoC because it has no DiRe layout overhead, while larger datasets
-can expose pure EVoC's neighbour/MST cost and raw-space density limits. The `scale`
-preset runs one fit per dataset, uses full dataset materializations where the loader can
-provide them, and includes 30k synthetic controls plus full MNIST, Fashion-MNIST,
-CIFAR-10, DBpedia-14 embeddings, Forest CoverType, Olivetti faces, Wiki-CS, and
-OGBN-Arxiv:
+Reproduce the guarded graph-component selector sweep (the results above):
 
 ```bash
 python examples/benchmark_dataset_suite.py \
-  --datasets scale \
-  --output-dir artifacts/scale-suite \
-  --prefer-hf \
-  --timing-repeats 1 \
-  --test-fraction 0.0 \
-  --continue-on-error
+  --datasets blobs30k,circles30k,moons30k,spirals_clean30k,mnist,fashion_mnist,cifar10,optdigits,pendigits,satimage,segment,vehicle \
+  --selector auto --output-dir artifacts/selector-auto-full \
+  --prefer-hf --timing-repeats 1 --test-fraction 0.0 --full --skip-fixed-k --continue-on-error
 ```
 
-CIFAR-10 is 60k images in the standard full train+test corpus. If the intended CIFAR
-target is CIFAR-100 or a combined CIFAR run, add that as a separate dataset slug before
-comparing the scale numbers. To regenerate the checked-in scale figures from local
-artifacts, pass the scale artifact tree explicitly:
-
-```bash
-python scripts/plot_benchmark_metrics.py \
-  --scale-artifacts artifacts/scale-163-192-62-0
-```
-
-Run the full CUDA Docker repro on a CUDA host and download the artifacts locally:
-
-```bash
-scripts/run_remote_cuda_repro.sh user@gpu-host
-```
-
-This syncs the working tree to the host, builds `dire-evoc:cuda128`, runs
-`examples/run_cuda_repro.py` in Docker, and downloads `manifest.json`, logs, datasets,
-`metrics.json`, `metrics.csv`, and SVG figures into `artifacts/cuda/`.
+The benchmark/tuning scripts under `examples/` (`benchmark_visuals.py`,
+`benchmark_dataset_suite.py` with `--list-datasets`, `benchmark_cached_layout_tuning.py`)
+cover the smaller suites, layout-dimension tuning, and dataset loaders; the full CUDA
+Docker repro is `scripts/run_remote_cuda_repro.sh`. See `docs/benchmarks.md` for the
+options and dataset notes. Rebuild the figures from local artifacts with
+`python scripts/plot_benchmark_metrics.py`.
 
 Minimal standalone intrinsic-dimension example:
 

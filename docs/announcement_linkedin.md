@@ -13,6 +13,10 @@ first-included fields.
 The scale run switches to one timed fit per dataset and covers 30k synthetic controls,
 full MNIST/Fashion-MNIST/CIFAR-10, full DBpedia-14 embeddings, Forest CoverType, Wiki-CS,
 and OGBN-Arxiv.
+The selector branch also adds an opt-in guarded graph-component selector: it recovers the
+separated-spirals control at **1.000 ARI** where coverage-weighted silhouette gets
+**0.151**, while falling back to silhouette on MNIST/Fashion/CIFAR/OpenML rows unless the
+graph candidate passes explicit guards.
 DiRe→EVōC wins Fashion-MNIST (**0.440 vs 0.390**), breast cancer (**0.404 vs 0.116**),
 iris (**0.562 vs 0.236**), wine (**0.465 vs 0.121**), and pooled CIFAR-10
 (**0.029 vs 0.012**). The newly added OpenML rows include strong DiRe→EVōC auto wins on

@@ -355,6 +355,154 @@ the torch-geometric graph-feature row in the scale preset.
 .. image:: _static/benchmark_scale_fit_ratio.svg
    :alt: Scale CUDA fit runtime ratio, DiReEVoC divided by pure EVoC
 
+Guarded graph-component selector sweep
+--------------------------------------
+
+The selector branch adds an opt-in ``selector="auto"`` mode. It keeps the
+coverage-weighted silhouette result as the fallback, then tests a stable connected-
+component labelling from the DiRe layout graph near ``ceil(intrinsic_dimension) + 1``
+neighbours. The graph layer is accepted only when it matches an explicit
+``base_n_clusters`` control or passes fragmentation guards; otherwise the silhouette
+layer is used.
+
+The selector artifact is ``artifacts/selector-auto-full/``. The plotting script writes
+``selector_vs_pure.csv`` plus the figures below. This is one matched, full-``n`` run on an
+NVIDIA A10 (``timing_policy=single_run``): DiReEVoC and pure EVoC are fit on the same data
+for every dataset, so all deltas are strictly matched — including OptDigits, PenDigits,
+SatImage, Image Segmentation, and Vehicle, which earlier borrowed a smaller-``n`` baseline.
+
+.. image:: _static/benchmark_selector_auto_vs_pure.svg
+   :alt: Guarded auto selector ARI compared with pure EVoC
+
+.. image:: _static/benchmark_selector_auto_delta_vs_pure.svg
+   :alt: Guarded auto selector ARI delta versus pure EVoC
+
+.. list-table::
+   :header-rows: 1
+
+   * - Dataset
+     - n
+     - d
+     - DiReEVoC guarded auto
+     - Pure EVoC auto
+     - Delta
+     - DiReEVoC fit
+     - Graph decision
+   * - Synthetic blobs 30k
+     - 30,000
+     - 32
+     - 1.000
+     - 1.000
+     - +0.000
+     - 30.1s
+     - fallback: no stable large components
+   * - Synthetic circles 30k
+     - 30,000
+     - 8
+     - 1.000
+     - 1.000
+     - +0.000
+     - 9.9s
+     - accepted: matches ``base_n_clusters=2``
+   * - Synthetic moons 30k
+     - 30,000
+     - 8
+     - 1.000
+     - 1.000
+     - +0.000
+     - 12.9s
+     - accepted: matches ``base_n_clusters=2``
+   * - Separated spirals 30k
+     - 30,000
+     - 2
+     - 1.000
+     - ≈0.00
+     - ≈+1.00
+     - 18.8s
+     - accepted: matches ``base_n_clusters=3``
+   * - MNIST full
+     - 70,000
+     - 784
+     - 0.883
+     - 0.892
+     - −0.009
+     - 113.7s
+     - fallback: no stable large components
+   * - Fashion-MNIST full
+     - 70,000
+     - 784
+     - 0.385
+     - 0.327
+     - +0.057
+     - 97.9s
+     - fallback: no stable large components
+   * - CIFAR-10 full
+     - 60,000
+     - 768
+     - 0.029
+     - 0.009
+     - +0.020
+     - 37.7s
+     - fallback: no stable large components
+   * - OptDigits full
+     - 5,620
+     - 64
+     - 0.823
+     - 0.184
+     - +0.639
+     - 22.8s
+     - fallback: no stable large components
+   * - PenDigits full
+     - 10,992
+     - 16
+     - 0.716
+     - 0.155
+     - +0.561
+     - 35.7s
+     - rejected: too few graph clusters without ``base_n_clusters``
+   * - SatImage full
+     - 6,430
+     - 36
+     - 0.596
+     - 0.359
+     - +0.237
+     - 24.7s
+     - fallback: no stable large components
+   * - Image Segmentation full
+     - 2,310
+     - 19
+     - 0.515
+     - 0.094
+     - +0.421
+     - 14.7s
+     - fallback: no stable large components
+   * - Vehicle full
+     - 846
+     - 18
+     - 0.110
+     - 0.108
+     - +0.001
+     - 12.3s
+     - rejected: too few graph clusters without ``base_n_clusters``
+
+The guarded graph override fires only on circles/moons/spirals, where a stable small-``k``
+component structure matches the supplied ``base_n_clusters``; on PenDigits and Vehicle a
+candidate forms but the guard rejects it, and everywhere else the selector defers to
+coverage-weighted silhouette. The real-data deltas are therefore DiRe-layout effects, not
+graph overrides. Timings are single-run, so expect run-to-run GPU variance.
+
+The pure-EVoC entry for this row needs an honest caveat. Earlier drafts reported it as
+``n/a`` because EVoC's label-propagation initializer calls ``PCA(n_components=4)``, and
+scikit-learn raises ``ValueError: n_components=4 must be between 0 and
+min(n_samples, n_features)`` on any input with fewer than 4 features. That is a
+dimensionality guard, not a verdict about clustering 2-D data. The benchmark now zero-pads
+the same spirals to 4-D so the initializer runs, and pure EVoC completes with the matched
+``base_n_clusters=3`` scoring **ARI ≈ 0.00** (0.0003 in this run) -- raw-space density
+clustering cannot separate the interleaved spiral arms regardless of dimension. DiReEVoC
+reaches ``1.000`` because the DiRe layout untangles the arms first. So the real delta is ≈
+**+1.00**, but it is a DiRe-embedding effect on a 2-D toy, not a selector effect and not an
+EVoC limitation.
+
 Comparative metrics
 -------------------
 

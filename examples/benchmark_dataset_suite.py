@@ -60,6 +60,7 @@ class DatasetSpec:
     default_subsample: int | None = None
     default_base_min_cluster_size: int | None = None
     default_base_n_clusters: int | None = None
+    metric: str = "cosine"
     note: str = ""
 
 
@@ -303,6 +304,16 @@ SCALE_DATASETS: dict[str, DatasetSpec] = {
         default_base_min_cluster_size=100,
         default_base_n_clusters=2,
         note="Generated locally; 30k nested nonlinear cluster geometry.",
+    ),
+    "spirals_clean30k": DatasetSpec(
+        "spirals_clean30k",
+        "Separated spirals 30k",
+        "synthetic_spirals_clean_30k",
+        default_base_min_cluster_size=100,
+        default_base_n_clusters=3,
+        metric="euclidean",
+        note="Generated locally; three separated 2-D spiral arms. Raw 2-D euclidean so "
+        "DiRe must untangle the arms; pure EVoC cannot run on <4-D input.",
     ),
 }
 
@@ -634,6 +645,35 @@ def synthetic_circles30k_npz(path: Path) -> None:
     synthetic_circles_npz(path, n=30000)
 
 
+def make_spirals_clean(n: int = 30000, arms: int = 3, seed: int = 0):
+    """Three well-separated, low-noise 2-D spiral arms.
+
+    Kept as raw 2-D (euclidean) so the DiRe layout has to untangle the arms. Pure EVoC
+    cannot run on this directly: its label-propagation init calls ``PCA(n_components=4)``,
+    which scikit-learn rejects for <4 features. That is a dimensionality guard, not a
+    clustering verdict; the honest pure-EVoC baseline is measured separately by padding
+    the same points to >=4-D (it scores ARI ~= 0.00).
+    """
+    rng = np.random.default_rng(seed)
+    per_arm = n // arms
+    xs, ys = [], []
+    for arm in range(arms):
+        t = np.linspace(0.6, 3.2, per_arm)
+        angle = t * 2.0 + arm * (2.0 * np.pi / arms)
+        pts = np.column_stack([t * np.cos(angle), t * np.sin(angle)])
+        pts = pts + rng.normal(scale=0.03, size=pts.shape)
+        xs.append(pts)
+        ys.append(np.full(per_arm, arm))
+    X = np.vstack(xs).astype(np.float64)
+    y = np.concatenate(ys)
+    return X, y
+
+
+def synthetic_spirals_clean30k_npz(path: Path) -> None:
+    X, y = make_spirals_clean(n=30000, arms=3, seed=0)
+    save_npz(path, X, y)
+
+
 def hf_dbpedia14_npz(path: Path, full: bool = False) -> None:
     from prepare_datasets import dbpedia14
 
@@ -647,6 +687,7 @@ LOCAL_LOADERS: dict[str, Callable[[Path], None]] = {
     "synthetic_blobs_30k": synthetic_blobs30k_npz,
     "synthetic_moons_30k": synthetic_moons30k_npz,
     "synthetic_circles_30k": synthetic_circles30k_npz,
+    "synthetic_spirals_clean_30k": synthetic_spirals_clean30k_npz,
     "sklearn_digits": sklearn_digits_npz,
     "sklearn_iris": sklearn_iris_npz,
     "sklearn_wine": sklearn_wine_npz,
@@ -775,9 +816,26 @@ def benchmark_command(spec: DatasetSpec, npz_path: Path, output_dir: Path, args)
         args.timing_primary,
         "--use-gpu",
         args.use_gpu,
+        "--metric",
+        spec.metric,
         "--selector",
         args.selector,
     ]
+    command.append(
+        "--graph-component-candidates"
+        if args.graph_component_candidates
+        else "--no-graph-component-candidates"
+    )
+    command.extend(
+        [
+            "--graph-component-min-stability",
+            str(args.graph_component_min_stability),
+            "--graph-component-k-radius",
+            str(args.graph_component_k_radius),
+            "--graph-component-min-cluster-ratio",
+            str(args.graph_component_min_cluster_ratio),
+        ]
+    )
     if base_n_clusters is not None:
         command.extend(["--base-n-clusters", str(base_n_clusters)])
     subsample = None if args.full else (args.subsample or spec.default_subsample)
@@ -837,6 +895,7 @@ def metrics_row(slug: str, metrics: dict, timing_primary: str) -> dict:
     dire = metrics["dire_evoc"]
     pure = metrics["vanilla_evoc"]
     timing_repeats = metrics["data"].get("timing_repeats", 1)
+    pure_auto = pure.get("auto_ari")
     return {
         "slug": slug,
         "dataset": metrics["data"]["label"],
@@ -846,11 +905,12 @@ def metrics_row(slug: str, metrics: dict, timing_primary: str) -> dict:
         "min_samples": metrics["data"].get("min_samples"),
         "base_min_cluster_size": metrics["data"].get("base_min_cluster_size"),
         "base_n_clusters": metrics["data"].get("base_n_clusters"),
+        "metric": metrics["data"].get("metric", "cosine"),
         "dire_auto_ari": dire["auto_ari"],
-        "pure_auto_ari": pure["auto_ari"],
-        "auto_delta": dire["auto_ari"] - pure["auto_ari"],
+        "pure_auto_ari": pure_auto,
+        "auto_delta": (dire["auto_ari"] - pure_auto) if pure_auto is not None else None,
         "dire_oracle_ari": dire["oracle_ari"],
-        "pure_oracle_ari": pure["oracle_ari"],
+        "pure_oracle_ari": pure.get("oracle_ari"),
         "dire_fixed_k_ari": dire.get("fixed_k_ari"),
         "pure_fixed_k_ari": pure.get("fixed_k_ari"),
         "dire_fit_seconds": metric_seconds(dire, "fit_seconds", timing_primary),
@@ -1051,8 +1111,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--selector",
         default="silhouette",
-        choices=["silhouette", "silhouette_raw", "base", "none"],
+        choices=["silhouette", "auto", "auto_ensemble", "silhouette_raw", "base", "none"],
     )
+    parser.add_argument(
+        "--graph-component-candidates",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument("--graph-component-min-stability", type=float, default=0.95)
+    parser.add_argument("--graph-component-k-radius", type=int, default=4)
+    parser.add_argument("--graph-component-min-cluster-ratio", type=float, default=1.5)
     parser.add_argument("--skip-fixed-k", action="store_true")
     return parser.parse_args()
 
