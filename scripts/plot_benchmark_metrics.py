@@ -35,7 +35,8 @@ SMOKE_ARTIFACTS = ROOT / "artifacts" / "cuda-timing-repeats-smoke"
 COMBINED_ARTIFACTS = ROOT / "artifacts" / "cuda-timing-repeats-combined"
 OPENML_EXTRA_ARTIFACTS = ROOT / "artifacts" / "cuda-timing-repeats-openml-extra"
 SCALE_ARTIFACTS = ROOT / "artifacts" / "cuda-scale"
-SELECTOR_ARTIFACTS = ROOT / "artifacts" / "selector-auto-full"
+SELECTOR_ARTIFACTS = ROOT / "artifacts" / "selector-auto-consensus"
+LEGACY_SELECTOR_ARTIFACTS = ROOT / "artifacts" / "selector-auto-full"
 DOCS_STATIC = ROOT / "docs" / "_static"
 
 
@@ -71,6 +72,12 @@ def read_suite_slugs(artifact_dir: Path) -> list[str]:
         for path in sorted(artifact_dir.glob("*/metrics.json"))
         if path.parent.name != "datasets"
     ]
+
+
+def resolve_selector_artifacts() -> Path:
+    if SELECTOR_ARTIFACTS.exists():
+        return SELECTOR_ARTIFACTS
+    return LEGACY_SELECTOR_ARTIFACTS
 
 
 def load_suite_rows(artifact_dir: Path, timing_primary: str) -> list[dict]:
@@ -612,7 +619,7 @@ def parse_args() -> argparse.Namespace:
         help="optional artifact tree(s) appended to the default benchmark figures",
     )
     parser.add_argument("--scale-artifacts", type=Path, default=SCALE_ARTIFACTS)
-    parser.add_argument("--selector-artifacts", type=Path, default=SELECTOR_ARTIFACTS)
+    parser.add_argument("--selector-artifacts", type=Path, default=resolve_selector_artifacts())
     parser.add_argument("--docs-static", type=Path, default=DOCS_STATIC)
     parser.add_argument(
         "--timing-primary",

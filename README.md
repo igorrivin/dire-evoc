@@ -74,10 +74,12 @@ The selector branch adds an opt-in guarded graph-component selector
 (`selector="auto"`). It keeps coverage-weighted silhouette as the fallback, then accepts
 a stable small-k connected-component layer from the DiRe layout graph only when it matches
 an explicit `base_n_clusters` control or passes fragmentation guards. The numbers below
-are one matched, full-`n` sweep on an NVIDIA A10 (`artifacts/selector-auto-full/`,
-`timing_policy=single_run`): for every dataset, DiReEVoC and pure EVoC are fit on the
-*same data* with the same EVoC `base_min_cluster_size`/`base_n_clusters` controls, so the
-deltas are strictly matched — no cross-`n` borrowing.
+are one matched, full-`n` sweep on an NVIDIA A10
+(`artifacts/selector-auto-consensus/`): for every dataset, DiReEVoC and pure EVoC are fit
+on the *same data* with the same EVoC `base_min_cluster_size`/`base_n_clusters` controls,
+so the deltas are strictly matched. Large datasets run once; datasets with
+`n <= 3000` use `restarts=8`, `restart_combine="consensus"`, and the sparse
+size-aware vote described below.
 
 `ARI delta` is DiReEVoC guarded-auto minus pure EVoC auto. `Fit` is the full
 `selector="auto"` DiReEVoC pipeline (DiRe layout + EVoC + layer post-processing); see the
@@ -89,18 +91,18 @@ timing discussion below for why that is not directly comparable to pure EVoC's s
 
 | Dataset | n | DiReEVoC auto ARI | Pure EVoC auto ARI | ARI delta | DiReEVoC fit | Notes |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Synthetic blobs 30k | 30,000 | 1.000 | 1.000 | +0.000 | 37.8s | silhouette fallback |
-| Synthetic circles 30k | 30,000 | 1.000 | 1.000 | +0.000 | 16.0s | graph layer accepted (matches `base_n_clusters=2`) |
-| Synthetic moons 30k | 30,000 | 1.000 | 1.000 | +0.000 | 15.8s | graph layer accepted (matches `base_n_clusters=2`) |
-| Separated spirals 30k | 30,000 | 1.000 | ≈0.00 | ≈+1.00 | 22.7s | graph layer accepted (matches `base_n_clusters=3`); pure EVoC zero-padded to 4-D to run, see below |
-| MNIST full | 70,000 | 0.884 | 0.892 | −0.008 | 124.8s | silhouette fallback |
-| Fashion-MNIST full | 70,000 | 0.390 | 0.327 | +0.063 | 107.5s | silhouette fallback |
-| CIFAR-10 full | 60,000 | 0.029 | 0.009 | +0.020 | 42.8s | silhouette fallback |
-| OptDigits full | 5,620 | 0.825 | 0.184 | +0.640 | 26.4s | silhouette fallback |
+| Synthetic blobs 30k | 30,000 | 1.000 | 1.000 | +0.000 | 23.0s | silhouette fallback |
+| Synthetic circles 30k | 30,000 | 1.000 | 1.000 | +0.000 | 16.1s | graph layer accepted (matches `base_n_clusters=2`) |
+| Synthetic moons 30k | 30,000 | 1.000 | 1.000 | +0.000 | 15.2s | graph layer accepted (matches `base_n_clusters=2`) |
+| Separated spirals 30k | 30,000 | 1.000 | ≈0.00 | ≈+1.00 | 22.1s | graph layer accepted (matches `base_n_clusters=3`); pure EVoC zero-padded to 4-D to run, see below |
+| MNIST full | 70,000 | 0.883 | 0.892 | −0.009 | 118.3s | silhouette fallback |
+| Fashion-MNIST full | 70,000 | 0.390 | 0.327 | +0.063 | 102.1s | silhouette fallback |
+| CIFAR-10 full | 60,000 | 0.030 | 0.009 | +0.020 | 38.4s | silhouette fallback |
+| OptDigits full | 5,620 | 0.824 | 0.184 | +0.640 | 23.8s | silhouette fallback |
 | PenDigits full | 10,992 | 0.780 | 0.155 | +0.625 | 39.8s | silhouette fallback; graph candidate rejected (`too_few_graph_clusters_without_base_n_clusters`) |
-| SatImage full | 6,430 | 0.602 | 0.359 | +0.243 | 29.2s | silhouette fallback |
-| Image Segmentation full | 2,310 | 0.327 | 0.094 | +0.233 | 15.2s | silhouette fallback (single run; restart-consensus lifts this to 0.413 — see below) |
-| Vehicle full | 846 | 0.110 | 0.108 | +0.002 | 14.4s | silhouette fallback; graph candidate rejected (`too_few_graph_clusters_without_base_n_clusters`) |
+| SatImage full | 6,430 | 0.596 | 0.359 | +0.237 | 25.2s | silhouette fallback |
+| Image Segmentation full | 2,310 | 0.392 | 0.094 | +0.298 | 26.8s | `consensus_of_8`; silhouette fallback inside each seeded run |
+| Vehicle full | 846 | 0.061 | 0.108 | −0.047 | 19.0s | `consensus_of_8`; graph candidate rejected (`too_few_graph_clusters_without_base_n_clusters`) |
 
 What the guarded selector actually does in this sweep: it accepts the graph-component
 layer only on circles/moons/spirals, where a stable small-`k` component structure matches
@@ -108,8 +110,8 @@ the supplied `base_n_clusters`. On PenDigits and Vehicle it forms a candidate bu
 rejects it (`too_few_graph_clusters_without_base_n_clusters`); everywhere else no stable
 large-component candidate forms and it falls back to coverage-weighted silhouette. So the
 selector is conservative by design — most real-data wins here come from the DiRe layout
-itself, not the graph override. Timings are single-run (`timing_repeats=1`), so expect
-run-to-run variance on the GPU pipeline.
+itself, not the graph override. The only restart-voted rows are Segment and Vehicle; the
+other ten rows are single-run.
 
 ### The "Separated spirals" row, honestly
 
@@ -130,22 +132,24 @@ accepted here because the three arms form a clean small-`k` component structure 
 
 ### Restart consensus for small, run-variant datasets
 
-Single-run selection is volatile on tiny datasets — Image Segmentation's single-run ARI
-swings across seeds. `DiReEVoC(restarts=N, restart_combine="consensus")` runs N seeded
-fits and votes: a pair of points is linked when it is a kNN-neighbour and shares a cluster
-in ≥ `restart_threshold` of the runs, and the consensus clusters are the connected
-components of that sparse graph (union-find; no n×n matrix). The standard suite applies it
-**only to small datasets** (`--small-max-n`, default 3000); large datasets run once, so the
-table above is unchanged for them.
+Single-run selection is volatile on tiny datasets. `DiReEVoC(restarts=N,
+restart_combine="consensus")` runs N seeded fits and votes: a pair of points is linked
+when it is a kNN-neighbour and shares a cluster in ≥ `restart_threshold` of the runs, and
+the consensus clusters are the connected components of that sparse graph (union-find; no
+n×n matrix). The standard suite applies it **only to small datasets**
+(`--small-max-n`, default 3000), so the headline table above already uses consensus for
+Image Segmentation and Vehicle while leaving the larger ten datasets on a matched
+single-run budget.
 
 ![Restart regimes on small volatile datasets](docs/_static/benchmark_consensus_voting.svg)
 
-On Image Segmentation an 8-restart consensus lifts auto ARI from a single-run **0.327** to
-**0.413** — beating both the single-run mean and a best-of-silhouette pick (silhouette is
-anti-correlated with ARI there, so picking the best-silhouette run *fails*; voting does
-not). It is neutral on Vehicle/SatImage and a no-op on the large datasets. See
-`docs/benchmarks.md` for the full three-way comparison; it is a small-dataset robustness
-tool, opt-in and off by default.
+In the published suite, that policy lifts Image Segmentation to **0.392** and leaves
+Vehicle at **0.061**. The separate three-way experiment is still informative: on Image
+Segmentation an 8-restart consensus can reach **0.413**, beating both the single-run mean
+and a best-of-silhouette pick (silhouette is anti-correlated with ARI there, so picking the
+best-silhouette run *fails*; voting does not). It is neutral-to-negative on Vehicle and a
+small positive on SatImage. See `docs/benchmarks.md` for the full comparison; it is a
+small-dataset robustness tool, opt-in and off by default outside the size-aware suite.
 
 ### Timing — DiRe also embeds, so the seconds are not apples-to-apples
 
@@ -228,8 +232,10 @@ Reproduce the guarded graph-component selector sweep (the results above):
 ```bash
 python examples/benchmark_dataset_suite.py \
   --datasets blobs30k,circles30k,moons30k,spirals_clean30k,mnist,fashion_mnist,cifar10,optdigits,pendigits,satimage,segment,vehicle \
-  --selector auto --output-dir artifacts/selector-auto-full \
-  --prefer-hf --timing-repeats 1 --test-fraction 0.0 --full --skip-fixed-k --continue-on-error
+  --selector auto --output-dir artifacts/selector-auto-consensus \
+  --prefer-hf --timing-repeats 1 --test-fraction 0.0 --full --skip-fixed-k --continue-on-error \
+  --restarts 8 --restart-combine consensus --restart-threshold 0.5 \
+  --restart-min-cluster-size 2 --small-max-n 3000
 ```
 
 The benchmark/tuning scripts under `examples/` (`benchmark_visuals.py`,
