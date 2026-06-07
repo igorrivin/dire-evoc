@@ -74,40 +74,6 @@ def _knn_indices(X, k=10):
     )[:, 1:]
 
 
-def test_fragment_merge_unions_adjacent_chain_fragments():
-    """Adjacent fragments of two continuous components should collapse by kNN links."""
-    x = np.linspace(0.0, 10.0, 500)
-    top = np.column_stack([x, np.zeros_like(x)])
-    bottom = np.column_stack([x, np.ones_like(x) * 10.0])
-    X = np.vstack([top, bottom])
-    labels = np.concatenate(
-        [
-            np.repeat(np.arange(5), 100),
-            np.repeat(np.arange(5, 10), 100),
-        ]
-    )
-
-    merged, info = DiReEVoC()._fragment_merge_labels(labels, _knn_indices(X, k=12))
-
-    assert info["merged"]
-    assert np.unique(merged).size == 2
-    assert np.unique(merged[:500]).size == 1
-    assert np.unique(merged[500:]).size == 1
-    assert merged[0] != merged[-1]
-
-
-def test_fragment_merge_keeps_separated_blobs_apart():
-    rng = np.random.default_rng(0)
-    centers = np.array([[0.0, 0.0], [10.0, 0.0], [0.0, 10.0], [10.0, 10.0]])
-    X = np.vstack([center + rng.normal(scale=0.15, size=(80, 2)) for center in centers])
-    labels = np.repeat(np.arange(4), 80)
-
-    merged, info = DiReEVoC()._fragment_merge_labels(labels, _knn_indices(X, k=12))
-
-    assert not info["merged"]
-    assert np.array_equal(merged, labels)
-
-
 def test_graph_component_candidate_accepts_stable_small_k_components():
     """Stable connected components in the stored kNN graph should become a candidate."""
     x = np.linspace(0.0, 10.0, 200)

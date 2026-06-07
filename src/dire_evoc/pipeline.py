@@ -106,9 +106,6 @@ class DiReEVoC:
                  base_min_cluster_size=5, base_n_clusters=None,
                  use_gpu="auto", selector="silhouette",
                  adaptive_min_samples=True, noise_gate=0.5,
-                 merge_fragments=True, fragment_merge_min_edges=3,
-                 fragment_merge_edge_fraction=0.01,
-                 fragment_merge_min_score_ratio=0.25,
                  graph_component_candidates=True,
                  graph_component_min_stability=0.95,
                  graph_component_k_radius=4,
@@ -126,10 +123,6 @@ class DiReEVoC:
         self.selector = selector
         self.adaptive_min_samples = adaptive_min_samples
         self.noise_gate = noise_gate
-        self.merge_fragments = merge_fragments
-        self.fragment_merge_min_edges = fragment_merge_min_edges
-        self.fragment_merge_edge_fraction = fragment_merge_edge_fraction
-        self.fragment_merge_min_score_ratio = fragment_merge_min_score_ratio
         self.graph_component_candidates = graph_component_candidates
         self.graph_component_min_stability = graph_component_min_stability
         self.graph_component_k_radius = graph_component_k_radius
@@ -707,20 +700,6 @@ class DiReEVoC:
             persistence,
             sel,
             score,
-        )
-        (
-            layers,
-            membership_layers,
-            persistence,
-            sel,
-            self.fragment_merge_,
-        ) = self._maybe_merge_fragments(
-            self.layout_,
-            layers,
-            membership_layers,
-            persistence,
-            sel,
-            self.reducer_,
         )
         layers, membership_layers, persistence = self._maybe_add_graph_component_layer(
             self.reducer_,

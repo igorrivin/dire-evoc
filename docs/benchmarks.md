@@ -201,20 +201,6 @@ many points away as noise. The current CUDA run still shows that layer selection
 solved in general: MNIST, digits, and several tiny or weak-feature datasets have much
 better fixed-k substrate scores than auto-selected scores.
 
-## Graph fragment merge
-
-Some DiRe layouts preserve the right connected geometry but EVoC emits adjacent pieces as
-separate density fragments. The pipeline now uses DiRe's original-space kNN graph to
-merge selected-layer fragments only when reciprocal cross-neighbor evidence or noise
-bridges support the merge. It rejects merges that collapse the selected layer to one
-cluster and rejects severe coverage-weighted-silhouette losses.
-
-In this run, moons and circles use the known two-cluster base target for both methods and
-both reach `1.000` ARI. Breast cancer remains a DiReEVoC win (`0.404` vs pure EVoC's
-`0.116`), though weaker than the previous fragment-merge-only run. Collapse-to-one
-merges are rejected on MNIST, digits, Fashion-MNIST, DBpedia-14, Olivetti, and Forest
-CoverType.
-
 ## Adaptive smoothing
 
 The tight synthetic-blobs failure was a layer-generation failure: the DiRe layout had a

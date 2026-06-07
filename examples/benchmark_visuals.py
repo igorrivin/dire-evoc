@@ -24,6 +24,7 @@ import argparse
 import csv
 import json
 import time
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -57,13 +58,58 @@ def load_npz(path):
     return z["X"].astype(np.float32), z["y"]
 
 
+@lru_cache(maxsize=None)
+def _declared_openml_specs():
+    from benchmark_dataset_suite import DATASETS
+
+    return tuple(DATASETS.values())
+
+
+def _declared_openml_spec(name):
+    key = str(name).strip().lower()
+    for spec in _declared_openml_specs():
+        if spec.source != "openml":
+            continue
+        if spec.slug.lower() == key:
+            return spec
+        if spec.openml_name and spec.openml_name.lower() == key:
+            return spec
+    return None
+
+
 def load_openml(name):
     from sklearn.datasets import fetch_openml
 
-    ds = fetch_openml(name, version=1, as_frame=False)
-    X = np.ascontiguousarray(ds.data, dtype=np.float32)
-    _, y = np.unique(ds.target, return_inverse=True)
-    return X, y
+    spec = _declared_openml_spec(name)
+    kwargs = {"as_frame": False}
+    if spec is not None and spec.openml_name is not None:
+        kwargs["name"] = spec.openml_name
+        kwargs["version"] = 1
+    elif spec is not None and spec.openml_id is not None:
+        kwargs["data_id"] = spec.openml_id
+    else:
+        kwargs["name"] = name
+        kwargs["version"] = 1
+
+    try:
+        ds = fetch_openml(**kwargs)
+        X = np.ascontiguousarray(ds.data, dtype=np.float32)
+        _, y = np.unique(ds.target, return_inverse=True)
+        return X, y
+    except Exception:
+        if spec is None:
+            raise
+        from benchmark_dataset_suite import materialize_dataset
+
+        cache_dir = Path(".cache") / "benchmark_visuals_openml_fallback"
+        npz_path = materialize_dataset(
+            spec,
+            cache_dir,
+            force=False,
+            prefer_hf=True,
+            full=True,
+        )
+        return load_npz(npz_path)
 
 
 def subsample(X, y, n, seed):
@@ -304,23 +350,6 @@ def _fit_dire_evoc_profile_once(X_train, y_train, X_test, y_test, args):
             selected_score,
         )
     )
-    (
-        layers,
-        membership_layers,
-        persistence,
-        selected_layer,
-        fragment_merge,
-    ), phases["fragment_merge_seconds"] = timed(
-        lambda: model._maybe_merge_fragments(
-            layout,
-            layers,
-            membership_layers,
-            persistence,
-            selected_layer,
-            reducer,
-        )
-    )
-
     # Guarded graph-component stage, mirroring DiReEVoC.fit() so the profiled "auto"
     # selector actually exercises the graph override (the per-phase timing breakdown is
     # why we hand-roll the pipeline instead of calling fit()).
@@ -390,7 +419,6 @@ def _fit_dire_evoc_profile_once(X_train, y_train, X_test, y_test, args):
                 + phases["evoc_cluster_seconds"]
                 + phases["layer_selection_seconds"]
                 + phases["adaptive_smoothing_seconds"]
-                + phases["fragment_merge_seconds"]
                 + phases["graph_component_seconds"]
                 + phases["intrinsic_dimension_seconds"]
                 + phases["prepare_reference_seconds"]
@@ -400,7 +428,6 @@ def _fit_dire_evoc_profile_once(X_train, y_train, X_test, y_test, args):
             "selected_layer": int(selected_layer),
             "selected_min_samples": int(selected_min_samples),
             "selected_base_min_cluster_size": int(selected_base_min_cluster_size),
-            "fragment_merge": fragment_merge,
             "graph_component_candidate": to_jsonable(
                 getattr(model, "graph_component_candidate_", None)
             ),
@@ -725,7 +752,6 @@ def plot_timings(metrics, output_dir):
         "EVoC on layout",
         "Layer selector",
         "Adaptive smoothing",
-        "Fragment merge",
         "ID",
         "Predict",
     ]
@@ -735,7 +761,6 @@ def plot_timings(metrics, output_dir):
         timings.get("evoc_cluster_seconds", 0.0),
         timings.get("layer_selection_seconds", 0.0),
         timings.get("adaptive_smoothing_seconds", 0.0),
-        timings.get("fragment_merge_seconds", 0.0),
         timings.get("intrinsic_dimension_seconds", 0.0),
         timings.get("predict_seconds", 0.0),
     ]
@@ -743,7 +768,6 @@ def plot_timings(metrics, output_dir):
         COLORS["evoc"],
         COLORS["dire"],
         COLORS["dire"],
-        COLORS["neutral"],
         COLORS["neutral"],
         COLORS["neutral"],
         COLORS["accent"],

@@ -255,7 +255,6 @@ def evaluate_cached_trial(
         use_gpu=args.use_gpu,
         selector=selector,
         adaptive_min_samples=adaptive_min_samples,
-        merge_fragments=not args.no_merge_fragments,
         random_state=args.seed,
         n_neighbors=args.n_neighbors,
         max_iter_layout=args.max_iter_layout,
@@ -289,29 +288,11 @@ def evaluate_cached_trial(
             selected_score,
         )
     )
-    (
-        layers,
-        membership_layers,
-        persistence,
-        selected_layer,
-        fragment_merge,
-    ), phases["fragment_merge_seconds"] = timed(
-        lambda: model._maybe_merge_fragments(
-            layout,
-            layers,
-            membership_layers,
-            persistence,
-            selected_layer,
-            reducer,
-        )
-    )
-
     labels = layers[selected_layer]
     cached_trial_seconds = float(
         phases["evoc_cluster_seconds"]
         + phases["layer_selection_seconds"]
         + phases["adaptive_smoothing_seconds"]
-        + phases["fragment_merge_seconds"]
     )
     result = evaluate_auto_oracle(labels, layers, y_train)
     result.update(
@@ -331,7 +312,6 @@ def evaluate_cached_trial(
             "cached_trial_seconds": cached_trial_seconds,
             "full_once_seconds": float(layout_seconds + cached_trial_seconds),
             "timings": phases,
-            "fragment_merge": fragment_merge,
             "auto_clusters": cluster_count(labels),
             "auto_noise_fraction": noise_fraction(labels),
             "membership_mean": float(np.mean(membership_layers[selected_layer])),
@@ -394,7 +374,6 @@ def parse_args():
     parser.add_argument("--n-neighbors", type=int, default=15)
     parser.add_argument("--max-iter-layout", type=int, default=100)
     parser.add_argument("--use-gpu", default="auto", choices=["auto", "true", "false"])
-    parser.add_argument("--no-merge-fragments", action="store_true")
     parser.add_argument("--skip-pure", action="store_true")
     parser.add_argument("--continue-on-error", action="store_true")
     return parser.parse_args()

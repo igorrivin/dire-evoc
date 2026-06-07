@@ -427,8 +427,8 @@ below.
      - 0.883
      - 0.892
      - −0.009
-     - 113.7s
-     - fallback: no stable large components
+     - 35.9s
+     - fallback: coverage-weighted silhouette
    * - Fashion-MNIST full
      - 70,000
      - 784
@@ -464,7 +464,7 @@ below.
    * - SatImage full
      - 6,430
      - 36
-     - 0.596
+     - 0.602
      - 0.359
      - +0.237
      - 25.2s
