@@ -60,6 +60,7 @@ class DatasetSpec:
     default_subsample: int | None = None
     default_base_min_cluster_size: int | None = None
     default_base_n_clusters: int | None = None
+    default_restarts: int | None = None
     metric: str = "cosine"
     note: str = ""
 
@@ -262,6 +263,7 @@ DATASETS: dict[str, DatasetSpec] = {
         "Vehicle",
         "openml",
         openml_name="vehicle",
+        default_restarts=4,
         note="Vehicle silhouette classification.",
     ),
     "wiki_cs": DatasetSpec(
@@ -786,6 +788,7 @@ def benchmark_command(spec: DatasetSpec, npz_path: Path, output_dir: Path, args)
         if args.base_n_clusters is not None
         else spec.default_base_n_clusters
     )
+    restarts = spec.default_restarts if spec.default_restarts is not None else args.restarts
     command = [
         sys.executable,
         "examples/benchmark_visuals.py",
@@ -822,7 +825,7 @@ def benchmark_command(spec: DatasetSpec, npz_path: Path, output_dir: Path, args)
         "--selector",
         args.selector,
         "--restarts",
-        str(args.restarts),
+        str(restarts),
         "--restart-combine",
         args.restart_combine,
         "--restart-threshold",

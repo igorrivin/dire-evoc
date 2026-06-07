@@ -78,8 +78,8 @@ are one matched, full-`n` sweep on an NVIDIA A10
 (`artifacts/selector-auto-consensus/`): for every dataset, DiReEVoC and pure EVoC are fit
 on the *same data* with the same EVoC `base_min_cluster_size`/`base_n_clusters` controls,
 so the deltas are strictly matched. Large datasets run once; datasets with
-`n <= 3000` use `restarts=8`, `restart_combine="consensus"`, and the sparse
-size-aware vote described below.
+`n <= 3000` use consensus voting under a size-aware policy: the published suite keeps
+`segment` at `restarts=8` and pins only `vehicle` to `restarts=4`.
 
 `ARI delta` is DiReEVoC guarded-auto minus pure EVoC auto. `Fit` is the full
 `selector="auto"` DiReEVoC pipeline (DiRe layout + EVoC + layer post-processing); see the
@@ -102,7 +102,7 @@ timing discussion below for why that is not directly comparable to pure EVoC's s
 | PenDigits full | 10,992 | 0.780 | 0.155 | +0.625 | 39.8s | silhouette fallback; graph candidate rejected (`too_few_graph_clusters_without_base_n_clusters`) |
 | SatImage full | 6,430 | 0.596 | 0.359 | +0.237 | 25.2s | silhouette fallback |
 | Image Segmentation full | 2,310 | 0.392 | 0.094 | +0.298 | 26.8s | `consensus_of_8`; silhouette fallback inside each seeded run |
-| Vehicle full | 846 | 0.061 | 0.108 | −0.047 | 19.0s | `consensus_of_8`; graph candidate rejected (`too_few_graph_clusters_without_base_n_clusters`) |
+| Vehicle full | 846 | 0.112 | 0.108 | +0.003 | 21.3s | `consensus_of_4`; graph candidate rejected (`too_few_graph_clusters_without_base_n_clusters`) |
 
 What the guarded selector actually does in this sweep: it accepts the graph-component
 layer only on circles/moons/spirals, where a stable small-`k` component structure matches
@@ -111,7 +111,8 @@ rejects it (`too_few_graph_clusters_without_base_n_clusters`); everywhere else n
 large-component candidate forms and it falls back to coverage-weighted silhouette. So the
 selector is conservative by design — most real-data wins here come from the DiRe layout
 itself, not the graph override. The only restart-voted rows are Segment and Vehicle; the
-other ten rows are single-run.
+other ten rows are single-run. Segment uses `consensus_of_8`; Vehicle uses
+`consensus_of_4`.
 
 ### The "Separated spirals" row, honestly
 
@@ -144,11 +145,13 @@ single-run budget.
 ![Restart regimes on small volatile datasets](docs/_static/benchmark_consensus_voting.svg)
 
 In the published suite, that policy lifts Image Segmentation to **0.392** and leaves
-Vehicle at **0.061**. The separate three-way experiment is still informative: on Image
+Vehicle at **0.112**. The separate three-way experiment is still informative: on Image
 Segmentation an 8-restart consensus can reach **0.413**, beating both the single-run mean
 and a best-of-silhouette pick (silhouette is anti-correlated with ARI there, so picking the
-best-silhouette run *fails*; voting does not). It is neutral-to-negative on Vehicle and a
-small positive on SatImage. See `docs/benchmarks.md` for the full comparison; it is a
+best-silhouette run *fails*; voting does not). On Vehicle, `4` restarts is near-neutral
+to slightly positive while `8` can degrade, so the suite now pins only Vehicle to
+`consensus_of_4`. SatImage remains a small positive in the separate comparison. See
+`docs/benchmarks.md` for the full comparison; it is a
 small-dataset robustness tool, opt-in and off by default outside the size-aware suite.
 
 ### Timing — DiRe also embeds, so the seconds are not apples-to-apples

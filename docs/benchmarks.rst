@@ -369,8 +369,8 @@ The selector artifact is ``artifacts/selector-auto-consensus/``. The plotting sc
 ``selector_vs_pure.csv`` plus the figures below. This is one matched, full-``n`` run on an
 NVIDIA A10: DiReEVoC and pure EVoC are fit on the same data for every dataset, so all
 deltas are strictly matched. Large datasets run once; datasets with ``n <= 3000`` use
-``restarts=8``, ``restart_combine="consensus"``, and the sparse size-aware vote described
-below.
+the size-aware consensus policy described below. In the published suite, ``segment`` keeps
+``restarts=8`` and only ``vehicle`` is pinned to ``restarts=4``.
 
 .. image:: _static/benchmark_selector_auto_vs_pure.svg
    :alt: Guarded auto selector ARI compared with pure EVoC
@@ -480,18 +480,18 @@ below.
    * - Vehicle full
      - 846
      - 18
-     - 0.061
+     - 0.112
      - 0.108
-     - -0.047
-     - 19.0s
-     - ``consensus_of_8``; rejected: too few graph clusters without ``base_n_clusters``
+     - +0.003
+     - 21.3s
+     - ``consensus_of_4``; rejected: too few graph clusters without ``base_n_clusters``
 
 The guarded graph override fires only on circles/moons/spirals, where a stable small-``k``
 component structure matches the supplied ``base_n_clusters``; on PenDigits and Vehicle a
 candidate forms but the guard rejects it, and everywhere else the selector defers to
 coverage-weighted silhouette. The real-data deltas are therefore DiRe-layout effects, not
 graph overrides. The only restart-voted rows are Segment and Vehicle; the other ten rows
-are single-run.
+are single-run. Segment uses ``consensus_of_8``; Vehicle uses ``consensus_of_4``.
 
 The pure-EVoC entry for this row needs an honest caveat. Earlier drafts reported it as
 ``n/a`` because EVoC's label-propagation initializer calls ``PCA(n_components=4)``, and
@@ -559,7 +559,8 @@ wall-clock. The full suite supports it: ``benchmark_dataset_suite.py --restarts 
 --restart-combine consensus`` (suite CSV records ``restart_regime``). The standard
 selector suite applies it only when ``n <= 3000``, so the published table above already
 uses consensus for Image Segmentation and Vehicle while keeping the larger datasets on a
-matched single-run budget.
+matched single-run budget. That override is dataset-specific: Vehicle is pinned to ``4``
+restarts, while Segment stays at ``8``.
 
 .. image:: _static/benchmark_consensus_voting.svg
    :alt: Restart regimes on small volatile datasets
@@ -595,7 +596,8 @@ Consensus voting is the robust restart combiner: it beats both single-run mean (
 best-of-silhouette (+0.11) on Image Segmentation -- the case where internal silhouette is
 anti-correlated with ARI and best-of-silhouette fails -- and is neutral-to-slightly-positive
 elsewhere. In the size-aware suite above, that policy yields published rows of ``0.392``
-for Segment and ``0.061`` for Vehicle. Threshold 0.4-0.5 works best; it is a
+for Segment and ``0.112`` for Vehicle because Vehicle is pinned to ``consensus_of_4``;
+``consensus_of_8`` was worse there. Threshold 0.4-0.5 works best; it is a
 small-dataset robustness tool, not a replacement for matched-budget single-run headlines
 outside the size-aware suite.
 

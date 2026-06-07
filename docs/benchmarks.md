@@ -150,9 +150,9 @@ This sweep is one matched, full-`n` run on an NVIDIA A10. DiReEVoC and pure EVoC
 on the *same data* for every dataset, with matched `base_min_cluster_size` and
 `base_n_clusters` controls, so every delta is strictly matched. The selector artifact is
 `artifacts/selector-auto-consensus/`, and the plotting script writes `selector_vs_pure.csv`
-plus the figures below. Large datasets run once; datasets with `n <= 3000` use
-`restarts=8`, `restart_combine="consensus"`, and the sparse size-aware vote described
-below.
+plus the figures below. Large datasets run once; datasets with `n <= 3000` use the
+size-aware consensus policy described below. In the published suite, `segment` keeps
+`restarts=8` and only `vehicle` is pinned to `restarts=4`.
 
 ![Guarded auto selector ARI](_static/benchmark_selector_auto_vs_pure.svg)
 
@@ -171,7 +171,7 @@ below.
 | PenDigits full | 10,992 | 16 | 0.780 | 0.155 | +0.625 | 39.8s | rejected: too few graph clusters without `base_n_clusters` |
 | SatImage full | 6,430 | 36 | 0.596 | 0.359 | +0.237 | 25.2s | fallback: no stable large components |
 | Image Segmentation full | 2,310 | 19 | 0.392 | 0.094 | +0.298 | 26.8s | `consensus_of_8`; silhouette fallback inside each seeded run |
-| Vehicle full | 846 | 18 | 0.061 | 0.108 | −0.047 | 19.0s | `consensus_of_8`; rejected: too few graph clusters without `base_n_clusters` |
+| Vehicle full | 846 | 18 | 0.112 | 0.108 | +0.003 | 21.3s | `consensus_of_4`; rejected: too few graph clusters without `base_n_clusters` |
 
 The guarded graph override fires only on circles/moons/spirals, where a stable small-`k`
 component structure matches the supplied `base_n_clusters`; on PenDigits and Vehicle a
@@ -179,7 +179,7 @@ candidate forms but the guard rejects it, and everywhere else no stable large-co
 candidate forms so the selector defers to coverage-weighted silhouette. The real-data
 deltas (e.g. OptDigits/PenDigits/Segment) are therefore DiRe-layout effects, not graph
 overrides. The only restart-voted rows are Segment and Vehicle; the other ten rows are
-single-run.
+single-run. Segment uses `consensus_of_8`; Vehicle uses `consensus_of_4`.
 
 The Separated spirals pure-EVoC entry needs an honest caveat. Earlier drafts reported it as
 `n/a` because EVoC's label-propagation initializer calls `PCA(n_components=4)`, and
@@ -226,6 +226,8 @@ components** of that graph (union-find; never an n×n matrix, so it scales to th
 budget). It costs N× the per-run wall-clock. The standard selector suite applies it only
 when `n <= 3000`, so the published table above already uses consensus for Image
 Segmentation and Vehicle while keeping the larger datasets on a matched single-run budget.
+That override is dataset-specific: Vehicle is pinned to `4` restarts, while Segment stays
+at `8`.
 
 An 8-restart experiment (`experiments/consensus_experiment.py`, A10, `selector="auto"`)
 compares three regimes on ground-truth ARI:
@@ -243,13 +245,13 @@ silhouette is anti-correlated with ARI there). Consensus voting beats both the s
 mean (+0.18) and best-of-silhouette (+0.11) because it aggregates stable pairwise
 co-occurrence across runs rather than trusting any one run's score. On Vehicle and SatImage
 it is neutral-to-slightly-positive. In the size-aware suite above, that policy yields
-published rows of `0.392` for Segment and `0.061` for Vehicle. Notes: the agreement
-threshold matters (0.4–0.5 best; ≥0.75 over-fragments); on Segment consensus produces more
-clusters than classes (k≈16) but purer ones; absolute ARIs on these tiny sets are
-run-variant, so read the *relative* three-way comparison, which is apples-to-apples within
-the run. Consensus voting is the robust restart combiner; it is a small-dataset robustness
-tool, not a replacement for matched-budget single-run headlines outside the size-aware
-suite.
+published rows of `0.392` for Segment and `0.112` for Vehicle because Vehicle is pinned to
+`consensus_of_4`; `consensus_of_8` was worse there. Notes: the agreement threshold matters
+(0.4–0.5 best; ≥0.75 over-fragments); on Segment consensus produces more clusters than
+classes (k≈16) but purer ones; absolute ARIs on these tiny sets are run-variant, so read
+the *relative* three-way comparison, which is apples-to-apples within the run. Consensus
+voting is the robust restart combiner; it is a small-dataset robustness tool, not a
+replacement for matched-budget single-run headlines outside the size-aware suite.
 
 ## Honest conclusion
 
@@ -258,7 +260,8 @@ This run supports a narrower claim:
 - Wins are dataset-dependent. DiReEVoC wins on iris, wine, breast cancer, Fashion-MNIST,
   CoverType, pooled CIFAR-10, OptDigits, PenDigits, and Image Segmentation; ties on
   moons and circles under the matched feasible controls; and loses on blobs, MNIST,
-  DBpedia-14, sklearn digits, Olivetti, SatImage, and Vehicle in the auto metric.
+  DBpedia-14, sklearn digits, Olivetti, and SatImage in the auto metric. Vehicle is now
+  effectively a tie under the `consensus_of_4` override.
 - Fixed-k can disagree with auto. Several datasets have good fixed-k substrate scores but
   poor selected layers, so fixed-k and oracle numbers must not hide selector failures.
 - Tiny data and weak image/tabular features are poor regimes. Olivetti, CIFAR-10,
