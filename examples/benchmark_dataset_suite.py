@@ -124,6 +124,7 @@ DATASETS: dict[str, DatasetSpec] = {
         "mnist",
         "MNIST",
         "openml",
+        openml_name="mnist_784",
         openml_id=554,
         hf_name="ylecun/mnist",
         hf_kind="image",
@@ -417,11 +418,11 @@ def fetch_openml_npz(
     from sklearn.datasets import fetch_openml
 
     kwargs = {"as_frame": False}
-    if spec.openml_id is not None:
-        kwargs["data_id"] = spec.openml_id
-    else:
+    if spec.openml_name is not None:
         kwargs["name"] = spec.openml_name
         kwargs["version"] = 1
+    elif spec.openml_id is not None:
+        kwargs["data_id"] = spec.openml_id
     try:
         try:
             ds = fetch_openml(**kwargs, parser="auto")

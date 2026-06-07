@@ -394,15 +394,15 @@ SatImage, Image Segmentation, and Vehicle, which earlier borrowed a smaller-``n`
      - 1.000
      - 1.000
      - +0.000
-     - 30.1s
-     - fallback: no stable large components
+     - 21.1s
+     - fallback: coverage-weighted silhouette
    * - Synthetic circles 30k
      - 30,000
      - 8
      - 1.000
      - 1.000
      - +0.000
-     - 9.9s
+     - 8.0s
      - accepted: matches ``base_n_clusters=2``
    * - Synthetic moons 30k
      - 30,000
@@ -410,7 +410,7 @@ SatImage, Image Segmentation, and Vehicle, which earlier borrowed a smaller-``n`
      - 1.000
      - 1.000
      - +0.000
-     - 12.9s
+     - 8.1s
      - accepted: matches ``base_n_clusters=2``
    * - Separated spirals 30k
      - 30,000
@@ -418,7 +418,7 @@ SatImage, Image Segmentation, and Vehicle, which earlier borrowed a smaller-``n`
      - 1.000
      - ≈0.00
      - ≈+1.00
-     - 18.8s
+     - 10.6s
      - accepted: matches ``base_n_clusters=3``
    * - MNIST full
      - 70,000
@@ -426,63 +426,63 @@ SatImage, Image Segmentation, and Vehicle, which earlier borrowed a smaller-``n`
      - 0.883
      - 0.892
      - −0.009
-     - 113.7s
-     - fallback: no stable large components
+     - 35.9s
+     - fallback: coverage-weighted silhouette
    * - Fashion-MNIST full
      - 70,000
      - 784
-     - 0.385
+     - 0.384
      - 0.327
      - +0.057
-     - 97.9s
-     - fallback: no stable large components
+     - 35.0s
+     - fallback: coverage-weighted silhouette
    * - CIFAR-10 full
      - 60,000
      - 768
      - 0.029
      - 0.009
-     - +0.020
-     - 37.7s
-     - fallback: no stable large components
+     - +0.019
+     - 25.2s
+     - fallback: coverage-weighted silhouette
    * - OptDigits full
      - 5,620
      - 64
-     - 0.823
+     - 0.825
      - 0.184
-     - +0.639
-     - 22.8s
-     - fallback: no stable large components
+     - +0.641
+     - 13.3s
+     - fallback: coverage-weighted silhouette
    * - PenDigits full
      - 10,992
      - 16
-     - 0.716
+     - 0.717
      - 0.155
-     - +0.561
-     - 35.7s
+     - +0.562
+     - 21.4s
      - rejected: too few graph clusters without ``base_n_clusters``
    * - SatImage full
      - 6,430
      - 36
-     - 0.596
+     - 0.602
      - 0.359
-     - +0.237
-     - 24.7s
-     - fallback: no stable large components
+     - +0.243
+     - 14.9s
+     - fallback: coverage-weighted silhouette
    * - Image Segmentation full
      - 2,310
      - 19
-     - 0.515
+     - 0.327
      - 0.094
-     - +0.421
-     - 14.7s
-     - fallback: no stable large components
+     - +0.234
+     - 8.1s
+     - fallback: coverage-weighted silhouette
    * - Vehicle full
      - 846
      - 18
      - 0.110
      - 0.108
-     - +0.001
-     - 12.3s
+     - +0.002
+     - 8.0s
      - rejected: too few graph clusters without ``base_n_clusters``
 
 The guarded graph override fires only on circles/moons/spirals, where a stable small-``k``

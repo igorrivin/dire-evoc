@@ -24,6 +24,7 @@ import argparse
 import csv
 import json
 import time
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -57,13 +58,58 @@ def load_npz(path):
     return z["X"].astype(np.float32), z["y"]
 
 
+@lru_cache(maxsize=None)
+def _declared_openml_specs():
+    from benchmark_dataset_suite import DATASETS
+
+    return tuple(DATASETS.values())
+
+
+def _declared_openml_spec(name):
+    key = str(name).strip().lower()
+    for spec in _declared_openml_specs():
+        if spec.source != "openml":
+            continue
+        if spec.slug.lower() == key:
+            return spec
+        if spec.openml_name and spec.openml_name.lower() == key:
+            return spec
+    return None
+
+
 def load_openml(name):
     from sklearn.datasets import fetch_openml
 
-    ds = fetch_openml(name, version=1, as_frame=False)
-    X = np.ascontiguousarray(ds.data, dtype=np.float32)
-    _, y = np.unique(ds.target, return_inverse=True)
-    return X, y
+    spec = _declared_openml_spec(name)
+    kwargs = {"as_frame": False}
+    if spec is not None and spec.openml_name is not None:
+        kwargs["name"] = spec.openml_name
+        kwargs["version"] = 1
+    elif spec is not None and spec.openml_id is not None:
+        kwargs["data_id"] = spec.openml_id
+    else:
+        kwargs["name"] = name
+        kwargs["version"] = 1
+
+    try:
+        ds = fetch_openml(**kwargs)
+        X = np.ascontiguousarray(ds.data, dtype=np.float32)
+        _, y = np.unique(ds.target, return_inverse=True)
+        return X, y
+    except Exception:
+        if spec is None:
+            raise
+        from benchmark_dataset_suite import materialize_dataset
+
+        cache_dir = Path(".cache") / "benchmark_visuals_openml_fallback"
+        npz_path = materialize_dataset(
+            spec,
+            cache_dir,
+            force=False,
+            prefer_hf=True,
+            full=True,
+        )
+        return load_npz(npz_path)
 
 
 def subsample(X, y, n, seed):
