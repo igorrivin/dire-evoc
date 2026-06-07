@@ -515,7 +515,14 @@ def _fit_dire_evoc_consensus(X_train, y_train, X_test, y_test, args):
 
 
 def fit_dire_evoc_profile(X_train, y_train, X_test, y_test, args):
-    if max(1, int(getattr(args, "restarts", 1))) > 1:
+    # Size-aware restart policy: multiple restarts (consensus) only pay off on small,
+    # run-variant datasets, so apply them only when n <= --small-max-n (0 = no limit).
+    # Large datasets fall back to a single run regardless of --restarts.
+    requested = max(1, int(getattr(args, "restarts", 1)))
+    small_max_n = int(getattr(args, "small_max_n", 0) or 0)
+    n = int(np.asarray(X_train).shape[0])
+    args.restarts = requested if (requested > 1 and (small_max_n <= 0 or n <= small_max_n)) else 1
+    if args.restarts > 1:
         return _fit_dire_evoc_consensus(X_train, y_train, X_test, y_test, args)
     repeats = max(1, int(args.timing_repeats))
     first_layout = None
@@ -881,6 +888,13 @@ def parse_args():
     p.add_argument("--restart-combine", default="consensus", choices=["consensus"])
     p.add_argument("--restart-threshold", type=float, default=0.5)
     p.add_argument("--restart-min-cluster-size", type=int, default=1)
+    p.add_argument(
+        "--small-max-n",
+        type=int,
+        default=0,
+        help="apply --restarts only when n <= this many points (0 = no limit); larger "
+        "datasets run once. Small, run-variant sets are where consensus helps.",
+    )
     p.add_argument(
         "--metric",
         default="cosine",

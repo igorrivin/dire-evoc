@@ -19,7 +19,8 @@ import numpy as np
 from sklearn.metrics import adjusted_rand_score as ari
 
 import sys
-sys.path.insert(0, "examples")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
 from benchmark_visuals import load_openml  # noqa: E402
 from dire_evoc import DiReEVoC  # noqa: E402
 from dire_evoc.selectors import coverage_silhouette_score  # noqa: E402

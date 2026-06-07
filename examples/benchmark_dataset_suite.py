@@ -828,6 +828,8 @@ def benchmark_command(spec: DatasetSpec, npz_path: Path, output_dir: Path, args)
         str(args.restart_threshold),
         "--restart-min-cluster-size",
         str(args.restart_min_cluster_size),
+        "--small-max-n",
+        str(args.small_max_n),
     ]
     command.append(
         "--graph-component-candidates"
@@ -1131,6 +1133,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--restart-combine", default="consensus", choices=["consensus"])
     parser.add_argument("--restart-threshold", type=float, default=0.5)
     parser.add_argument("--restart-min-cluster-size", type=int, default=1)
+    parser.add_argument(
+        "--small-max-n",
+        type=int,
+        default=3000,
+        help="restarts apply only to datasets with n <= this (default 3000); larger "
+        "datasets always run once. Set 0 to disable the size gate.",
+    )
     parser.add_argument(
         "--graph-component-candidates",
         action=argparse.BooleanOptionalAction,
