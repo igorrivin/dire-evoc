@@ -1017,11 +1017,13 @@ def main():
     print(f"wrote metrics and SVG figures to {output_dir}")
     pure_str = f"{vanilla['auto_ari']:.4f}" if pure_available else "unavailable"
     print(f"auto ARI: DiReEVoC={dire['auto_ari']:.4f}, pure EVoC={pure_str}")
+    timings = dire.get("timings", {})
     print(
         "intrinsic dimension: "
         f"{dire.get('intrinsic_dimension', None)}; "
-        f"DiRe layout seconds={dire['timings']['dire_layout_seconds']:.3f}; "
-        f"EVoC-on-layout seconds={dire['timings']['evoc_cluster_seconds']:.3f}"
+        f"regime={dire.get('restart_regime', 'single_run')}; "
+        f"DiRe layout seconds={timings.get('dire_layout_seconds', float('nan')):.3f}; "
+        f"EVoC-on-layout seconds={timings.get('evoc_cluster_seconds', float('nan')):.3f}"
     )
 
 
