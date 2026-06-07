@@ -1,0 +1,119 @@
+[
+  {
+    "dataset": "segment",
+    "n": 2310,
+    "restarts": 8,
+    "fit_seconds_total": 161.0541033340005,
+    "single_run": {
+      "ari_mean": 0.22947326119439643,
+      "ari_std": 0.051305252454084814,
+      "ari_min": 0.16696865007819556,
+      "ari_max": 0.30091038974497425
+    },
+    "best_of_silhouette": {
+      "seed": 7,
+      "ari": 0.30091038974497425
+    },
+    "consensus": {
+      "0.4": {
+        "ari": 0.412741905936811,
+        "n_clusters": 16,
+        "noise_fraction": 0.048051948051948054
+      },
+      "0.5": {
+        "ari": 0.412741905936811,
+        "n_clusters": 16,
+        "noise_fraction": 0.048051948051948054
+      },
+      "0.6": {
+        "ari": 0.4031306491182818,
+        "n_clusters": 16,
+        "noise_fraction": 0.06017316017316017
+      },
+      "0.75": {
+        "ari": 0.2898192179333464,
+        "n_clusters": 16,
+        "noise_fraction": 0.20822510822510823
+      }
+    },
+    "consensus_best_threshold": "0.4"
+  },
+  {
+    "dataset": "vehicle",
+    "n": 846,
+    "restarts": 8,
+    "fit_seconds_total": 14.036067188999368,
+    "single_run": {
+      "ari_mean": 0.08001617317722806,
+      "ari_std": 0.024708957568708306,
+      "ari_min": 0.0568097337392528,
+      "ari_max": 0.11582543528378546
+    },
+    "best_of_silhouette": {
+      "seed": 2,
+      "ari": 0.11582543528378546
+    },
+    "consensus": {
+      "0.4": {
+        "ari": 0.10693798815716667,
+        "n_clusters": 7,
+        "noise_fraction": 0.16784869976359337
+      },
+      "0.5": {
+        "ari": 0.10693798815716667,
+        "n_clusters": 7,
+        "noise_fraction": 0.16784869976359337
+      },
+      "0.6": {
+        "ari": 0.060706691297492635,
+        "n_clusters": 10,
+        "noise_fraction": 0.22340425531914893
+      },
+      "0.75": {
+        "ari": 0.05698883522957372,
+        "n_clusters": 10,
+        "noise_fraction": 0.29550827423167847
+      }
+    },
+    "consensus_best_threshold": "0.4"
+  },
+  {
+    "dataset": "satimage",
+    "n": 6430,
+    "restarts": 8,
+    "fit_seconds_total": 107.7380290379997,
+    "single_run": {
+      "ari_mean": 0.589800097221057,
+      "ari_std": 0.03516904308537862,
+      "ari_min": 0.49752063629186105,
+      "ari_max": 0.6081656409805941
+    },
+    "best_of_silhouette": {
+      "seed": 1,
+      "ari": 0.6046794842390018
+    },
+    "consensus": {
+      "0.4": {
+        "ari": 0.6070937587148559,
+        "n_clusters": 7,
+        "noise_fraction": 0.03685847589424572
+      },
+      "0.5": {
+        "ari": 0.6070937587148559,
+        "n_clusters": 7,
+        "noise_fraction": 0.03685847589424572
+      },
+      "0.6": {
+        "ari": 0.6039619014589926,
+        "n_clusters": 7,
+        "noise_fraction": 0.045878693623639194
+      },
+      "0.75": {
+        "ari": 0.6000241797375482,
+        "n_clusters": 7,
+        "noise_fraction": 0.05194401244167963
+      }
+    },
+    "consensus_best_threshold": "0.4"
+  }
+]

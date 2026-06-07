@@ -422,7 +422,101 @@ def _fit_dire_evoc_profile_once(X_train, y_train, X_test, y_test, args):
     return layout, result
 
 
+def _fit_dire_evoc_consensus(X_train, y_train, X_test, y_test, args):
+    """Restart + consensus-voting regime via the wired DiReEVoC.fit (one implementation).
+
+    Unlike the single-run profiler this does not hand-roll per-phase timings: the regime's
+    honest cost is the whole multi-restart fit, which we time directly.
+    """
+    from dire_evoc import DiReEVoC
+    from dire_evoc.dimension import intrinsic_dimension_from_dire
+
+    model = DiReEVoC(
+        n_components=args.n_components,
+        metric=args.metric,
+        min_samples=args.min_samples,
+        base_min_cluster_size=args.base_min_cluster_size,
+        base_n_clusters=args.base_n_clusters,
+        use_gpu=args.use_gpu,
+        selector=args.selector,
+        graph_component_candidates=args.graph_component_candidates,
+        graph_component_min_stability=args.graph_component_min_stability,
+        graph_component_k_radius=args.graph_component_k_radius,
+        graph_component_min_cluster_ratio=args.graph_component_min_cluster_ratio,
+        restarts=args.restarts,
+        restart_combine=args.restart_combine,
+        restart_threshold=args.restart_threshold,
+        restart_min_cluster_size=args.restart_min_cluster_size,
+        random_state=args.seed,
+        n_neighbors=args.n_neighbors,
+        max_iter_layout=args.max_iter_layout,
+    )
+    _, fit_seconds = timed(lambda: model.fit(X_train))
+    labels = np.asarray(model.labels_)
+    result = evaluate_auto_oracle(labels, [labels], y_train)  # consensus has no layer set
+
+    holdout = None
+    predict_seconds = 0.0
+    if X_test is not None:
+        (pred_labels, pred_membership), predict_seconds = timed(
+            lambda: model.predict(X_test, n_neighbors=args.predict_neighbors,
+                                  return_membership=True)
+        )
+        holdout = {
+            "ari": float(adjusted_rand_score(y_test, pred_labels)),
+            "nmi": float(normalized_mutual_info_score(y_test, pred_labels)),
+            "clusters": cluster_count(pred_labels),
+            "noise_fraction": noise_fraction(pred_labels),
+            "mean_membership": float(np.mean(pred_membership)),
+        }
+    try:
+        intrinsic = intrinsic_dimension_from_dire(model.reducer_, method="twonn")
+    except Exception:
+        intrinsic = None
+
+    timings = {"fit_seconds": float(fit_seconds), "predict_seconds": float(predict_seconds)}
+    result.update({
+        "fit_seconds": float(fit_seconds),
+        "total_seconds": float(fit_seconds + predict_seconds),
+        "timings": timings,
+        "selected_layer": -1,
+        "selected_min_samples": int(getattr(model, "selected_min_samples_", args.min_samples)),
+        "selected_base_min_cluster_size": int(
+            getattr(model, "selected_base_min_cluster_size_", args.base_min_cluster_size)),
+        "graph_component_candidate": to_jsonable(
+            getattr(model, "graph_component_candidate_", None)),
+        "graph_component_layer": None,
+        "restart_regime": getattr(model, "restart_regime_", None),
+        "restart_threshold": float(args.restart_threshold),
+        "restart_min_cluster_size": int(args.restart_min_cluster_size),
+        "on_gpu": bool(model._resolve_gpu()),
+        "layout_shape": list(np.asarray(model.layout_).shape),
+        "intrinsic_dimension": None if intrinsic is None else float(intrinsic),
+        "knn_indices_shape": shape_or_none(getattr(model.reducer_, "_knn_indices", None)),
+        "knn_distances_shape": shape_or_none(getattr(model.reducer_, "_knn_distances", None)),
+        "holdout": holdout,
+        "membership_mean": float(np.mean(model.membership_)),
+        "persistence_scores": [],
+        "timing_repeats": 1,
+        "timing_primary": args.timing_primary,
+        "timing_policy": getattr(model, "restart_regime_", "single_run"),
+        "fit_seconds_first": float(fit_seconds),
+        "fit_seconds_warm_mean": float(fit_seconds),
+        "fit_seconds_mean_all": float(fit_seconds),
+        "total_seconds_first": float(fit_seconds + predict_seconds),
+        "total_seconds_warm_mean": float(fit_seconds + predict_seconds),
+        "timing_stats": {
+            "fit_seconds": summarize_seconds([float(fit_seconds)]),
+            "total_seconds": summarize_seconds([float(fit_seconds + predict_seconds)]),
+            "phases": summarize_timing_dicts([timings]),
+        },
+    })
+    return np.asarray(model.layout_), result
+
+
 def fit_dire_evoc_profile(X_train, y_train, X_test, y_test, args):
+    if max(1, int(getattr(args, "restarts", 1))) > 1:
+        return _fit_dire_evoc_consensus(X_train, y_train, X_test, y_test, args)
     repeats = max(1, int(args.timing_repeats))
     first_layout = None
     first_result = None
@@ -777,6 +871,16 @@ def parse_args():
         help="which repeated timing summary is reported as fit_seconds",
     )
     p.add_argument("--use-gpu", default="auto", choices=["auto", "true", "false"])
+    p.add_argument(
+        "--restarts",
+        type=int,
+        default=1,
+        help="restart regime: 1 (default) single run; >1 runs N seeded fits and combines "
+        "by --restart-combine, charging the summed wall-clock",
+    )
+    p.add_argument("--restart-combine", default="consensus", choices=["consensus"])
+    p.add_argument("--restart-threshold", type=float, default=0.5)
+    p.add_argument("--restart-min-cluster-size", type=int, default=1)
     p.add_argument(
         "--metric",
         default="cosine",

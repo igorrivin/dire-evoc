@@ -16,6 +16,8 @@ itself (``.layout_``) is the deliverable, not a hard partition -- inspect
 """
 import numpy as np
 
+from ._unionfind import UnionFind, components_from_edges
+from .consensus import consensus_labels
 from .dimension import intrinsic_dimension_from_dire
 from .predict import knn_vote_predict, prepare_reference
 from .selectors import (
@@ -112,6 +114,8 @@ class DiReEVoC:
                  graph_component_k_radius=4,
                  graph_component_min_cluster_ratio=1.5,
                  gpu_cluster_min_samples=1000,
+                 restarts=1, restart_combine="consensus",
+                 restart_threshold=0.5, restart_min_cluster_size=1,
                  n_neighbors_predict=None, random_state=None, **dire_kwargs):
         self.n_components = n_components
         self.metric = metric
@@ -131,6 +135,10 @@ class DiReEVoC:
         self.graph_component_k_radius = graph_component_k_radius
         self.graph_component_min_cluster_ratio = graph_component_min_cluster_ratio
         self.gpu_cluster_min_samples = gpu_cluster_min_samples
+        self.restarts = restarts
+        self.restart_combine = restart_combine
+        self.restart_threshold = restart_threshold
+        self.restart_min_cluster_size = restart_min_cluster_size
         self.n_neighbors_predict = n_neighbors_predict
         self.random_state = random_state
         self.dire_kwargs = dire_kwargs
@@ -145,11 +153,12 @@ class DiReEVoC:
         except Exception:
             return False
 
-    def _build_layout(self, X):
+    def _build_layout(self, X, seed=None):
         from dire_rapids import create_dire
         reducer = create_dire(
             n_components=self.n_components, metric=self.metric,
-            random_state=self.random_state, **self.dire_kwargs,
+            random_state=self.random_state if seed is None else seed,
+            **self.dire_kwargs,
         )
         layout = np.ascontiguousarray(reducer.fit_transform(X), dtype=np.float32)
         return layout, reducer
@@ -242,29 +251,11 @@ class DiReEVoC:
         knn_indices = np.asarray(knn_indices)
         n = knn_indices.shape[0]
         k = int(min(max(1, k), knn_indices.shape[1]))
-        parent = np.arange(n, dtype=np.int64)
-
-        def find(x):
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
-
-        def union(a, b):
-            ra = find(a)
-            rb = find(b)
-            if ra != rb:
-                parent[rb] = ra
-
-        for i in range(n):
-            for j in knn_indices[i, :k]:
-                j = int(j)
-                if 0 <= j < n and j != i:
-                    union(i, j)
-
-        roots = np.array([find(i) for i in range(n)], dtype=np.int64)
-        _, labels = np.unique(roots, return_inverse=True)
-        return labels.astype(np.int64, copy=False)
+        src = np.repeat(np.arange(n), k)
+        dst = knn_indices[:, :k].reshape(-1)
+        valid = (dst >= 0) & (dst < n) & (dst != src)
+        edges = np.stack([src[valid], dst[valid]], axis=1)
+        return components_from_edges(n, edges)
 
     def _graph_component_candidate(self, reducer, min_component_size):
         """Return a stable small-k graph-component labelling, if one exists.
@@ -528,19 +519,7 @@ class DiReEVoC:
                 b = label_to_pos[int(other)]
                 directed[(a, b)] = directed.get((a, b), 0) + 1
 
-        parent = np.arange(unique.size)
-
-        def find(x):
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
-
-        def union(a, b):
-            ra = find(a)
-            rb = find(b)
-            if ra != rb:
-                parent[rb] = ra
+        uf = UnionFind(unique.size)
 
         merged_edges = 0
         for (a, b), count_ab in list(directed.items()):
@@ -551,16 +530,16 @@ class DiReEVoC:
                 continue
             smaller = max(1, int(min(sizes[a], sizes[b])))
             if reciprocal_edges / smaller >= self.fragment_merge_edge_fraction:
-                union(a, b)
+                uf.union(a, b)
                 merged_edges += 1
 
         bridge_edges = 0
         for (a, b), bridge_count in noise_bridges.items():
             if bridge_count >= self.fragment_merge_min_edges:
-                union(a, b)
+                uf.union(a, b)
                 bridge_edges += 1
 
-        roots = np.array([find(i) for i in range(unique.size)])
+        roots = np.array([uf.find(i) for i in range(unique.size)])
         if np.unique(roots).size == unique.size:
             return labels, {
                 "merged": False,
@@ -575,7 +554,7 @@ class DiReEVoC:
         }
         merged_labels = labels.copy()
         for old_pos, old_label in pos_to_label.items():
-            merged_labels[labels == old_label] = root_to_new[find(old_pos)]
+            merged_labels[labels == old_label] = root_to_new[uf.find(old_pos)]
         return merged_labels, {
             "merged": True,
             "merged_edges": int(merged_edges),
@@ -656,15 +635,60 @@ class DiReEVoC:
 
     # -- API -----------------------------------------------------------------
     def fit(self, X, y=None):
+        """Fit the pipeline.
+
+        ``restarts == 1`` (default) is a single run -- unchanged behaviour. With
+        ``restarts > 1`` and ``restart_combine="consensus"`` the pipeline runs ``restarts``
+        independently seeded fits and combines them by SPARSE CO-ASSOCIATION VOTING: a pair
+        of points is linked when it is a kNN-neighbour and shares a cluster in at least
+        ``restart_threshold`` of the runs, and the consensus clusters are the connected
+        components of that graph (see ``dire_evoc.consensus``). This targets small,
+        run-variant datasets; it costs ``restarts``x the per-run wall-clock. ``labels_`` is
+        the consensus labelling, ``membership_`` the per-point non-noise vote fraction, and
+        ``restart_regime_`` records the regime.
+        """
         X = np.ascontiguousarray(X)
         on_gpu = self._resolve_gpu()
+        restarts = max(1, int(self.restarts))
+        if restarts == 1:
+            self._fit_once(X, on_gpu, self.random_state)
+            self.restart_regime_ = "single_run"
+            return self
+        if self.restart_combine != "consensus":
+            raise ValueError(
+                f"restart_combine={self.restart_combine!r} is not supported; only "
+                "'consensus' (sparse co-association voting) is implemented for restarts>1."
+            )
+        labelings, neighbor_lists, non_noise = [], [], []
+        for i in range(restarts):
+            seed = None if self.random_state is None else int(self.random_state) + i
+            self._fit_once(X, on_gpu, seed)  # leaves self.* set to this (carrier) run
+            labelings.append(np.asarray(self.labels_).copy())
+            neighbor_lists.append(np.asarray(getattr(self.reducer_, "_knn_indices")).copy())
+            non_noise.append(np.asarray(self.labels_) >= 0)
+        consensus = consensus_labels(
+            labelings, neighbor_lists,
+            threshold=self.restart_threshold,
+            min_cluster_size=self.restart_min_cluster_size,
+        )
+        # keep the last run's layout_/reducer_/cluster_layers_ as the carrier for
+        # inspection; override the operative labelling with the consensus vote.
+        self.labels_ = consensus
+        self.membership_ = np.mean(np.stack(non_noise, axis=0), axis=0).astype(np.float64)
+        self.selected_layer_ = None
+        self.restart_regime_ = f"consensus_of_{restarts}"
+        if getattr(self, "_reference_", None) is not None:
+            self._reference_labels_ = consensus
+        return self
+
+    def _fit_once(self, X, on_gpu, seed):
         self.graph_component_layer_ = None
         self.graph_component_candidate_ = {
             "enabled": bool(self.graph_component_candidates),
             "accepted": False,
             "reason": "not_evaluated",
         }
-        self.layout_, self.reducer_ = self._build_layout(X)
+        self.layout_, self.reducer_ = self._build_layout(X, seed=seed)
         layers, membership_layers, persistence = self._cluster(self.layout_, on_gpu)
         sel, score = self._best_layer(self.layout_, layers)
         (
@@ -743,7 +767,6 @@ class DiReEVoC:
             if self.n_neighbors_predict is not None
             else getattr(self.reducer_, "n_neighbors", 15)
         )
-        return self
 
     def fit_predict(self, X, y=None):
         self.fit(X)

@@ -544,6 +544,54 @@ Comparative metrics
    clustering time are separated so it is clear which part is the bottleneck on the
    current machine. Repeated timing fields include first-run and warm-only summaries.
 
+Restart consensus voting for small datasets
+--------------------------------------------
+
+Single-run selection (``restarts=1``) is the matched-budget default, but on tiny datasets
+a single seed is volatile. ``DiReEVoC(restarts=N, restart_combine="consensus")`` runs N
+independently seeded fits and combines them by **sparse co-association voting**: a pair of
+points is linked when it is a kNN-neighbour and shares a cluster in at least
+``restart_threshold`` of the runs, and the consensus clusters are the connected components
+of that graph (union-find; never an n-by-n matrix). It costs N-times the per-run
+wall-clock. The full suite supports it: ``benchmark_dataset_suite.py --restarts 8
+--restart-combine consensus`` (suite CSV records ``restart_regime``).
+
+.. image:: _static/benchmark_consensus_voting.svg
+   :alt: Restart regimes on small volatile datasets
+
+An 8-restart experiment (``experiments/consensus_experiment.py``, A10, ``selector="auto"``)
+on ground-truth ARI:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Dataset
+     - n
+     - single-run (mean, min-max)
+     - best-of-silhouette
+     - consensus vote
+   * - Image Segmentation
+     - 2,310
+     - 0.230 (0.167-0.301)
+     - 0.301
+     - **0.413**
+   * - Vehicle
+     - 846
+     - 0.080 (0.057-0.116)
+     - 0.116
+     - 0.107
+   * - SatImage
+     - 6,430
+     - 0.590 (0.498-0.608)
+     - 0.605
+     - 0.607
+
+Consensus voting is the robust restart combiner: it beats both single-run mean (+0.18) and
+best-of-silhouette (+0.11) on Image Segmentation -- the case where internal silhouette is
+anti-correlated with ARI and best-of-silhouette fails -- and is neutral-to-slightly-positive
+elsewhere. Threshold 0.4-0.5 works best; it is a small-dataset robustness tool, not a
+replacement for the matched-budget single-run headline numbers.
+
 Interpretation
 --------------
 

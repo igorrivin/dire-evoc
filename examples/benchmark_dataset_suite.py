@@ -820,6 +820,14 @@ def benchmark_command(spec: DatasetSpec, npz_path: Path, output_dir: Path, args)
         spec.metric,
         "--selector",
         args.selector,
+        "--restarts",
+        str(args.restarts),
+        "--restart-combine",
+        args.restart_combine,
+        "--restart-threshold",
+        str(args.restart_threshold),
+        "--restart-min-cluster-size",
+        str(args.restart_min_cluster_size),
     ]
     command.append(
         "--graph-component-candidates"
@@ -924,6 +932,7 @@ def metrics_row(slug: str, metrics: dict, timing_primary: str) -> dict:
         "timing_repeats": timing_repeats,
         "timing_primary": timing_primary,
         "timing_policy": timing_policy(timing_repeats, timing_primary),
+        "restart_regime": dire.get("restart_regime", "single_run"),
         "output_dir": slug,
     }
 
@@ -1113,6 +1122,15 @@ def parse_args() -> argparse.Namespace:
         default="silhouette",
         choices=["silhouette", "auto", "auto_ensemble", "silhouette_raw", "base", "none"],
     )
+    parser.add_argument(
+        "--restarts",
+        type=int,
+        default=1,
+        help="restart regime forwarded to each dataset: 1 single run; >1 consensus voting",
+    )
+    parser.add_argument("--restart-combine", default="consensus", choices=["consensus"])
+    parser.add_argument("--restart-threshold", type=float, default=0.5)
+    parser.add_argument("--restart-min-cluster-size", type=int, default=1)
     parser.add_argument(
         "--graph-component-candidates",
         action=argparse.BooleanOptionalAction,

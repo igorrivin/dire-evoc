@@ -38,8 +38,10 @@ distance), `base_min_cluster_size` (EVoC base-layer size, default 5 to match EVo
 `"none"`), `adaptive_min_samples` (retry density smoothing when a tight layout produces
 mostly noise), `merge_fragments` (merge adjacent selected-layer fragments using DiRe's
 original-space kNN graph), `graph_component_candidates` (make a stable small-k
-connected-component layer available to the auto selectors), and `use_gpu` (`"auto"`).
-Extra keywords are forwarded to `dire_rapids.create_dire` (e.g. `n_neighbors`,
+connected-component layer available to the auto selectors), `restarts` (default `1`;
+`>1` with `restart_combine="consensus"` runs N seeded fits and combines them by sparse
+co-association voting — see the benchmarks page for when it helps), and `use_gpu`
+(`"auto"`). Extra keywords are forwarded to `dire_rapids.create_dire` (e.g. `n_neighbors`,
 `max_iter_layout`).
 
 > **When is the partition the right object?** Density clustering assumes density-separated
