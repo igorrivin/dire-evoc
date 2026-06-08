@@ -1,5 +1,11 @@
 name: Documentation
 
+# Deployment prerequisite:
+# 1. Enable GitHub Pages in repository Settings and select "GitHub Actions" as the source.
+# 2. Add repository variable PAGES_ENABLED=true to turn on the configure/upload/deploy steps.
+# The workflow always builds Sphinx, but Pages-specific steps stay gated until the repo is
+# explicitly configured because GITHUB_TOKEN cannot create a Pages site for first-time setup.
+
 on:
   push:
     branches: [main, master]
