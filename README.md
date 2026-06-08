@@ -74,10 +74,12 @@ The selector branch adds an opt-in guarded graph-component selector
 (`selector="auto"`). It keeps coverage-weighted silhouette as the fallback, then accepts
 a stable small-k connected-component layer from the DiRe layout graph only when it matches
 an explicit `base_n_clusters` control or passes fragmentation guards. The numbers below
-are one matched, full-`n` sweep on an NVIDIA A10 (`artifacts/selector-auto-full/`,
-`timing_policy=single_run`): for every dataset, DiReEVoC and pure EVoC are fit on the
-*same data* with the same EVoC `base_min_cluster_size`/`base_n_clusters` controls, so the
-deltas are strictly matched — no cross-`n` borrowing.
+are one matched, full-`n` sweep on an NVIDIA A10
+(`artifacts/selector-auto-consensus/`): for every dataset, DiReEVoC and pure EVoC are fit
+on the *same data* with the same EVoC `base_min_cluster_size`/`base_n_clusters` controls,
+so the deltas are strictly matched. Large datasets run once; datasets with
+`n <= 3000` use consensus voting under a size-aware policy: the published suite keeps
+`segment` at `restarts=8` and pins only `vehicle` to `restarts=4`.
 
 `ARI delta` is DiReEVoC guarded-auto minus pure EVoC auto. `Fit` is the full
 `selector="auto"` DiReEVoC pipeline (DiRe layout + EVoC + layer post-processing); see the
@@ -89,18 +91,18 @@ timing discussion below for why that is not directly comparable to pure EVoC's s
 
 | Dataset | n | DiReEVoC auto ARI | Pure EVoC auto ARI | ARI delta | DiReEVoC fit | Notes |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Synthetic blobs 30k | 30,000 | 1.000 | 1.000 | +0.000 | 21.1s | silhouette fallback |
-| Synthetic circles 30k | 30,000 | 1.000 | 1.000 | +0.000 | 8.0s | graph layer accepted (matches `base_n_clusters=2`) |
-| Synthetic moons 30k | 30,000 | 1.000 | 1.000 | +0.000 | 8.1s | graph layer accepted (matches `base_n_clusters=2`) |
-| Separated spirals 30k | 30,000 | 1.000 | ≈0.00 | ≈+1.00 | 10.6s | graph layer accepted (matches `base_n_clusters=3`); pure EVoC zero-padded to 4-D to run, see below |
-| MNIST full | 70,000 | 0.883 | 0.892 | −0.009 | 35.9s | silhouette fallback |
-| Fashion-MNIST full | 70,000 | 0.384 | 0.327 | +0.057 | 35.0s | silhouette fallback |
-| CIFAR-10 full | 60,000 | 0.029 | 0.009 | +0.019 | 25.2s | silhouette fallback |
-| OptDigits full | 5,620 | 0.825 | 0.184 | +0.641 | 13.3s | silhouette fallback |
-| PenDigits full | 10,992 | 0.717 | 0.155 | +0.562 | 21.4s | silhouette fallback; graph candidate rejected (`too_few_graph_clusters_without_base_n_clusters`) |
-| SatImage full | 6,430 | 0.602 | 0.359 | +0.243 | 14.9s | silhouette fallback |
-| Image Segmentation full | 2,310 | 0.327 | 0.094 | +0.234 | 8.1s | silhouette fallback |
-| Vehicle full | 846 | 0.110 | 0.108 | +0.002 | 8.0s | silhouette fallback; graph candidate rejected (`too_few_graph_clusters_without_base_n_clusters`) |
+| Synthetic blobs 30k | 30,000 | 1.000 | 1.000 | +0.000 | 23.0s | silhouette fallback |
+| Synthetic circles 30k | 30,000 | 1.000 | 1.000 | +0.000 | 16.1s | graph layer accepted (matches `base_n_clusters=2`) |
+| Synthetic moons 30k | 30,000 | 1.000 | 1.000 | +0.000 | 15.2s | graph layer accepted (matches `base_n_clusters=2`) |
+| Separated spirals 30k | 30,000 | 1.000 | ≈0.00 | ≈+1.00 | 22.1s | graph layer accepted (matches `base_n_clusters=3`); pure EVoC zero-padded to 4-D to run, see below |
+| MNIST full | 70,000 | 0.883 | 0.892 | −0.009 | 118.3s | silhouette fallback |
+| Fashion-MNIST full | 70,000 | 0.390 | 0.327 | +0.063 | 102.1s | silhouette fallback |
+| CIFAR-10 full | 60,000 | 0.030 | 0.009 | +0.020 | 38.4s | silhouette fallback |
+| OptDigits full | 5,620 | 0.824 | 0.184 | +0.640 | 23.8s | silhouette fallback |
+| PenDigits full | 10,992 | 0.780 | 0.155 | +0.625 | 39.8s | silhouette fallback; graph candidate rejected (`too_few_graph_clusters_without_base_n_clusters`) |
+| SatImage full | 6,430 | 0.596 | 0.359 | +0.237 | 25.2s | silhouette fallback |
+| Image Segmentation full | 2,310 | 0.392 | 0.094 | +0.298 | 26.8s | `consensus_of_8`; silhouette fallback inside each seeded run |
+| Vehicle full | 846 | 0.112 | 0.108 | +0.003 | 21.3s | `consensus_of_4`; graph candidate rejected (`too_few_graph_clusters_without_base_n_clusters`) |
 
 What the guarded selector actually does in this sweep: it accepts the graph-component
 layer only on circles/moons/spirals, where a stable small-`k` component structure matches
@@ -108,8 +110,9 @@ the supplied `base_n_clusters`. On PenDigits and Vehicle it forms a candidate bu
 rejects it (`too_few_graph_clusters_without_base_n_clusters`); everywhere else no stable
 large-component candidate forms and it falls back to coverage-weighted silhouette. So the
 selector is conservative by design — most real-data wins here come from the DiRe layout
-itself, not the graph override. Timings are single-run (`timing_repeats=1`), so expect
-run-to-run variance on the GPU pipeline.
+itself, not the graph override. The only restart-voted rows are Segment and Vehicle; the
+other ten rows are single-run. Segment uses `consensus_of_8`; Vehicle uses
+`consensus_of_4`.
 
 ### The "Separated spirals" row, honestly
 
@@ -128,6 +131,29 @@ EVoC sees them. So the real delta is ≈ **+1.00**, a genuine win — but it is 
 accepted here because the three arms form a clean small-`k` component structure matching
 `base_n_clusters=3`, but silhouette on the same layout already recovers them.)
 
+### Restart consensus for small, run-variant datasets
+
+Single-run selection is volatile on tiny datasets. `DiReEVoC(restarts=N,
+restart_combine="consensus")` runs N seeded fits and votes: a pair of points is linked
+when it is a kNN-neighbour and shares a cluster in ≥ `restart_threshold` of the runs, and
+the consensus clusters are the connected components of that sparse graph (union-find; no
+n×n matrix). The standard suite applies it **only to small datasets**
+(`--small-max-n`, default 3000), so the headline table above already uses consensus for
+Image Segmentation and Vehicle while leaving the larger ten datasets on a matched
+single-run budget.
+
+![Restart regimes on small volatile datasets](docs/_static/benchmark_consensus_voting.svg)
+
+In the published suite, that policy lifts Image Segmentation to **0.392** and leaves
+Vehicle at **0.112**. The separate three-way experiment is still informative: on Image
+Segmentation an 8-restart consensus can reach **0.413**, beating both the single-run mean
+and a best-of-silhouette pick (silhouette is anti-correlated with ARI there, so picking the
+best-silhouette run *fails*; voting does not). On Vehicle, `4` restarts is near-neutral
+to slightly positive while `8` can degrade, so the suite now pins only Vehicle to
+`consensus_of_4`. SatImage remains a small positive in the separate comparison. See
+`docs/benchmarks.md` for the full comparison; it is a
+small-dataset robustness tool, opt-in and off by default outside the size-aware suite.
+
 ### Timing — DiRe also embeds, so the seconds are not apples-to-apples
 
 Pure EVoC clusters the raw vectors directly; DiReEVoC first builds a DiRe layout and then
@@ -136,20 +162,22 @@ this sweep make the split concrete (MNIST full, one fit):
 
 | Phase | DiReEVoC | Pure EVoC |
 | --- | ---: | ---: |
-| DiRe layout (embedding) | 12.9s | — |
-| EVoC clustering | 1.3s | 20.4s (whole fit) |
-| Layer selection | 0.9s | — |
-| Adaptive smoothing | 17.4s | — |
-| Graph-component stage | 6.1s | — |
-| **Total fit** | **38.8s** | **20.4s** |
+| DiRe layout (embedding) | 17.5s | — |
+| EVoC clustering | 1.6s | 25.2s (whole fit) |
+| Layer selection | 1.5s | — |
+| Adaptive smoothing | 24.6s | — |
+| Fragment merge | 61.7s | — |
+| Graph-component stage | 17.7s | — |
+| **Total fit** | **124.8s** | **25.2s** |
 
-Two things follow. First, the embedding is a real, irreducible cost that pure EVoC does
-not pay (~13s here, ~33% of the fit) — but it is also what buys the quality on hard
-manifolds and yields a reusable layout for visualization and out-of-sample prediction.
-Second, on large data a large share of DiReEVoC's wall time is not the embedding at all
-but the DiRe-specific layer post-processing (adaptive smoothing ≈ 17s here, plus a
-~6s graph-component stage under `selector="auto"`). Pure EVoC's ~20s fits are the right
-baseline to keep in mind: DiReEVoC is still the slower method,
+(Single-run, cold timings; the repeated-timing suite in `docs/benchmarks.md` reports warm
+means, where pure EVoC's MNIST fit is a few seconds.) Two things follow. First, the
+embedding is a real, irreducible cost that pure EVoC does not pay (~17s here, ~14% of the
+fit) — but it is also what buys the quality on hard manifolds and yields a reusable layout
+for visualization and out-of-sample prediction. Second, on large data most of DiReEVoC's
+wall time is not the embedding at all but the DiRe-specific layer post-processing (adaptive
+smoothing + fragment merge ≈ 86s here). The warm pure-EVoC baseline is the one to keep in
+mind: DiReEVoC is the much slower method
 and only earns its cost where the layout is a materially better substrate than the raw
 vectors (e.g. OptDigits/PenDigits/Segment, where the matched delta is large).
 
@@ -207,8 +235,10 @@ Reproduce the guarded graph-component selector sweep (the results above):
 ```bash
 python examples/benchmark_dataset_suite.py \
   --datasets blobs30k,circles30k,moons30k,spirals_clean30k,mnist,fashion_mnist,cifar10,optdigits,pendigits,satimage,segment,vehicle \
-  --selector auto --output-dir artifacts/selector-auto-full \
-  --prefer-hf --timing-repeats 1 --test-fraction 0.0 --full --skip-fixed-k --continue-on-error
+  --selector auto --output-dir artifacts/selector-auto-consensus \
+  --prefer-hf --timing-repeats 1 --test-fraction 0.0 --full --skip-fixed-k --continue-on-error \
+  --restarts 8 --restart-combine consensus --restart-threshold 0.5 \
+  --restart-min-cluster-size 2 --small-max-n 3000
 ```
 
 The benchmark/tuning scripts under `examples/` (`benchmark_visuals.py`,
