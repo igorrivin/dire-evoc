@@ -33,9 +33,8 @@ jobs:
           python -m pip install -e '.[docs]'
 
       - name: Configure Pages
+        if: ${{ vars.PAGES_ENABLED == 'true' }}
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: Generate benchmark figures
         run: python scripts/plot_benchmark_metrics.py
@@ -44,11 +43,13 @@ jobs:
         run: python -m sphinx -W --keep-going -b html docs docs/_build/html
 
       - name: Upload Pages artifact
+        if: ${{ vars.PAGES_ENABLED == 'true' }}
         uses: actions/upload-pages-artifact@v4
         with:
           path: docs/_build/html
 
   deploy:
+    if: ${{ vars.PAGES_ENABLED == 'true' }}
     needs: build
     runs-on: ubuntu-latest
     environment:
