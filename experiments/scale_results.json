@@ -1,0 +1,62 @@
+{
+  "vanilla@100000": {
+    "status": "ok",
+    "wall_s": 3.76,
+    "fit_s": 1.96,
+    "n_clusters": 1766,
+    "noise_frac": 0.3966
+  },
+  "dire@100000": {
+    "status": "ok",
+    "wall_s": 38.16,
+    "fit_s": 26.81,
+    "intrinsic_dim": 11.44,
+    "n_clusters": 1260,
+    "noise_frac": 0.4774
+  },
+  "vanilla@250000": {
+    "status": "ok",
+    "wall_s": 7.52,
+    "fit_s": 5.52,
+    "n_clusters": 8,
+    "noise_frac": 0.5016
+  },
+  "dire@250000": {
+    "status": "ok",
+    "wall_s": 75.77,
+    "fit_s": 64.23,
+    "intrinsic_dim": 11.612,
+    "n_clusters": 1557,
+    "noise_frac": 0.5567
+  },
+  "vanilla@500000": {
+    "status": "ok",
+    "wall_s": 14.32,
+    "fit_s": 12.13,
+    "n_clusters": 4203,
+    "noise_frac": 0.5528
+  },
+  "dire@500000": {
+    "status": "ok",
+    "wall_s": 137.64,
+    "fit_s": 125.97,
+    "intrinsic_dim": 11.491,
+    "n_clusters": 1191,
+    "noise_frac": 0.6308
+  },
+  "vanilla@1000000": {
+    "status": "ok",
+    "wall_s": 28.87,
+    "fit_s": 26.15,
+    "n_clusters": 6,
+    "noise_frac": 0.599
+  },
+  "dire@1000000": {
+    "status": "ok",
+    "wall_s": 277.94,
+    "fit_s": 265.83,
+    "intrinsic_dim": 11.641,
+    "n_clusters": 1092,
+    "noise_frac": 0.676
+  }
+}

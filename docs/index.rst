@@ -21,6 +21,7 @@ and RAPIDS/cuML.
    hybrid
    prediction
    benchmarks
+   scaling
 
 .. toctree::
    :maxdepth: 2
