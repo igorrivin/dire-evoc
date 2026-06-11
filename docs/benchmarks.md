@@ -253,7 +253,7 @@ the *relative* three-way comparison, which is apples-to-apples within the run. C
 voting is the robust restart combiner; it is a small-dataset robustness tool, not a
 replacement for matched-budget single-run headlines outside the size-aware suite.
 
-## Honest conclusion
+## Conclusion
 
 This run supports a narrower claim:
 
@@ -268,6 +268,52 @@ This run supports a narrower claim:
   CoverType, Segment, and Vehicle are not strong quality wins in absolute ARI.
 - DiRe layout construction dominates end-to-end time except where pure EVoC itself is
   slow.
+
+## Scaling and stability to one million points (unlabelled)
+
+Everything above is supervised — scored against ground-truth labels. A separate study asks a
+different question on real, *unlabelled* data: clustering one million
+`Cohere/wikipedia-2023-11-embed-multilingual-v3` (English) 1024-d embeddings, does vanilla
+EVoC return, and is its clustering *stable* as data is added? Because the corpus is cached in
+stream order, the first 100k rows are a subset of every larger prefix, so we can measure
+**stability ARI**: how much the cluster assignment of that shared 100k anchor survives as N
+grows from 100k to 1M (self-consistency — each method judged against itself, not against
+class labels).
+
+![Scaling stability ARI: vanilla EVoC vs DiReEVoC](_static/benchmark_scaling_stability_ari.svg)
+
+| Measurement (ARI on the shared 100k anchor) | vanilla EVoC | DiReEVoC |
+|---|---:|---:|
+| Noise floor — default labels, same N=100k, two seeds | 0.39 | 0.57 |
+| Noise floor — best layer, same N=100k, two seeds | 0.60 | 0.73 |
+| Default labels across N (100k → 1M) | ~0 (−0.06) | 0.48 – 0.54 |
+| Oracle best layer across N (100k → 1M) | 0.45 – 0.52 | 0.54 – 1.00 |
+
+Vanilla EVoC returns quickly even at a million points (26s; both methods scale near-linearly,
+DiReEVoC ~10× slower from the layout cost), so runtime is not the issue. The issue is
+stability: its across-N agreement is ~0, *below* its own 0.39 seed-noise floor, so the
+labelling shifts substantially as data is added rather than settling, and its cluster count
+varies a good deal with N (1766, 8, 4203, 6). DiReEVoC's across-N agreement (~0.5) is
+indistinguishable from its same-seed floor (0.57), and its cluster count holds a tight band
+(1092–1557). The claim is narrow and scale-specific: at this scale **DiRe adds robustness as
+the corpus grows**, which matters more than fit time. Full method, confound analysis,
+timing/cluster figures, and the RAPIDS environment note are in `docs/scaling.rst`.
+
+This study is a separate, push-button pipeline that mirrors the one above: run it on a GPU
+host, download the artifact tree, and rebuild the figures locally.
+
+```bash
+scripts/run_remote_cuda_scaling.sh user@gpu-host
+# then (also done automatically by the script unless PLOT=0):
+python scripts/plot_scaling_metrics.py --artifacts artifacts/cuda-scaling
+```
+
+`scripts/run_remote_cuda_scaling.sh` syncs the tree, builds the CUDA image, runs
+`examples/run_cuda_scaling.py` (cache embeddings → `experiments/scale_compare.py` →
+`experiments/stability.py`), and rsyncs `scale_results.json` + `stability_results.json` back
+under `artifacts/cuda-scaling/`. `scripts/plot_scaling_metrics.py` reads that tree (or, by
+default, the committed `experiments/*.json`) and writes the three `docs/_static/benchmark_scaling_*.svg`
+figures.
 
 ## Compared with `master`
 

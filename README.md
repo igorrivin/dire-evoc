@@ -195,6 +195,70 @@ vectors (e.g. OptDigits/PenDigits/Segment, where the matched delta is large).
   DiReEVoC only repays its embedding + post-processing cost when the layout genuinely
   separates structure the raw space does not.
 
+## Scaling and stability to one million points
+
+The benchmark above is supervised: it scores against ground-truth labels. The scaling
+study asks a different question on real, *unlabelled* data — one million
+`Cohere/wikipedia-2023-11-embed-multilingual-v3` (English) 1024-d paragraph embeddings,
+streamed and cached in stream order so the first 100k rows are a subset of every larger
+prefix. There is no ground truth, so "ARI" here is **stability ARI**: how much the cluster
+assignment of the shared 100k anchor points *survives as N grows from 100k to 1M*. Each
+method is judged against itself — a stable method scores ARI ≈ 1 against its own labels at
+the next size; an unstable one decays toward 0. Run on a single NVIDIA GH200.
+
+This is a separate, push-button pipeline that mirrors the supervised benchmark above — run
+it on a GPU host, download the artifact tree, and rebuild these figures locally:
+
+```bash
+scripts/run_remote_cuda_scaling.sh user@gpu-host
+# (the runner also rebuilds the figures; or do it by hand from any artifact tree:)
+python scripts/plot_scaling_metrics.py --artifacts artifacts/cuda-scaling
+```
+
+The runner caches the corpus once, then runs `experiments/scale_compare.py` (timing,
+cluster counts) and `experiments/stability.py` (anchor stability ARI), writing
+`scale_results.json` + `stability_results.json`.
+
+The headline: **vanilla EVoC returns quickly at a million points, but its labelling does not
+stay stable under added data; DiReEVoC's does.** At this scale what matters is whether the
+labels hold as the corpus grows, more than how fast the fit returns — and that stability is
+what the DiRe layout adds.
+
+![Scaling stability ARI: vanilla EVoC vs DiReEVoC](docs/_static/benchmark_scaling_stability_ari.svg)
+
+| Measurement (ARI on the shared 100k anchor) | vanilla EVoC | DiReEVoC |
+| --- | ---: | ---: |
+| Noise floor — default labels, same N=100k, two seeds | 0.39 | 0.57 |
+| Noise floor — best layer, same N=100k, two seeds | 0.60 | 0.73 |
+| Default labels across N (100k → 1M) | ~0 (−0.06) | 0.48 – 0.54 |
+| Oracle best layer across N (100k → 1M) | 0.45 – 0.52 | 0.54 – 1.00 |
+
+Two confounds are controlled. The **noise floor** refits at the same N=100k with two seeds,
+so an across-N drop only counts as real instability if it falls *below* that floor.
+Vanilla's across-N agreement (~0) is below its own 0.39 floor — adding data does not perturb
+the clustering, it replaces it — and even an oracle layer-matcher never exceeds ~0.5.
+DiReEVoC's across-N agreement (~0.5) is indistinguishable from its same-seed floor (0.57):
+growing the data tenfold perturbs the labels no more than changing the random seed does, and
+the oracle best layer reaches 1.00 at the largest step.
+
+Runtime is not the headline here. Both methods scale near-linearly: vanilla clusters a
+million 1024-d vectors in **26s**, and DiReEVoC is ~10× slower (the fixed cost of building
+the DiRe layout, also linear — exponents `p ≈ 1.13` vanilla, `p ≈ 0.97` dire). The question,
+however, is whether the result holds as the data grows. The cluster count is the first hint:
+vanilla's varies a good deal with N (1766, 8, 4203, 6), while DiReEVoC's stays in a tight band
+(1092 – 1557) with intrinsic dimension steady at 11.4 – 11.6 across the range.
+
+![Scaling fit time vs N](docs/_static/benchmark_scaling_fit_seconds.svg)
+![Cluster count vs N](docs/_static/benchmark_scaling_clusters.svg)
+
+The defensible claim is narrow and scale-specific: **vanilla EVoC's clustering collapses
+under added data while DiReEVoC's does not** — DiRe buys *robustness to scale*, not speed.
+It is **not** a claim of absolute reproducibility: DiReEVoC's fixed-N floor is only 0.57
+(0.73 at the best layer), so neither method is deterministic at a given N. See
+`docs/scaling.rst` for the full method, confound analysis, and the RAPIDS environment note.
+Rebuild these three figures from the committed `experiments/scale_results.json` and
+`experiments/stability_results.json` with `python scripts/plot_scaling_metrics.py`.
+
 ## Installation
 
 Base install:
