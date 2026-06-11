@@ -124,3 +124,21 @@ and uses full materializations where available: 30k synthetic controls, full MNI
 full Fashion-MNIST, full CIFAR-10, full DBpedia-14 embeddings, full Forest CoverType,
 Olivetti faces, Wiki-CS, and OGBN-Arxiv. Optional graph-feature datasets are Wiki-CS
 and OGBN-Arxiv.
+
+## 6. Scaling & stability study
+
+A separate push-button pipeline measures behaviour at one million unlabelled embeddings:
+does vanilla EVoC return, and does its clustering stay stable as data is added? It mirrors
+the benchmark suite's remote-run-then-plot shape.
+
+```bash
+scripts/run_remote_cuda_scaling.sh user@gpu-host        # run on GPU, download artifacts
+python scripts/plot_scaling_metrics.py --artifacts artifacts/cuda-scaling   # rebuild figures
+```
+
+The runner caches the corpus, runs `experiments/scale_compare.py` (timing/cluster counts)
+and `experiments/stability.py` (ARI of a shared 100k anchor as N grows — self-consistency,
+not ground truth), and writes `scale_results.json` + `stability_results.json`. The headline:
+vanilla EVoC clusters a million 1024-d vectors in ~26s but its labelling collapses under added
+data (across-N ARI ~0), while DiReEVoC's holds (~0.5, at its own seed-noise floor). DiRe buys
+robustness to scale, not speed. See `docs/scaling.rst` for the full study.

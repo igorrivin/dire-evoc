@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import json
 import subprocess
 import sys
 import time
@@ -106,52 +107,131 @@ def fit_all(args):
             print(f"[fit ] {method}@{n} s{seed}: TIMEOUT", flush=True)
 
 
-def analyze(args):
+def _layers_of(fields) -> list:
+    return [fields[k] for k in fields.files
+            if k.startswith("layer_") and k != "layer_ncl"]
+
+
+def _range(values: list[float]) -> dict:
+    """Summarize a list of per-step ARIs as a representative value plus its range."""
+    clean = [float(v) for v in values if v == v]  # drop NaN
+    if not clean:
+        return {"value": None, "min": None, "max": None, "per_step": []}
+    return {
+        "value": round(sum(clean) / len(clean), 3),
+        "min": round(min(clean), 3),
+        "max": round(max(clean), 3),
+        "per_step": [round(v, 3) for v in clean],
+    }
+
+
+def measure(args) -> dict:
+    """Compute the four stability measurements per method into a structured dict.
+
+    Mirrors the printed tables: a same-N two-seed noise floor (default labels and the
+    oracle best-matching layer) and the across-N agreement of the shared anchor (default
+    labels and oracle best layer). This is the dict serialized to stability_results.json,
+    which scripts/plot_scaling_metrics.py turns into the documentation figure.
+    """
     from sklearn.metrics import adjusted_rand_score as ari
     sizes = sorted(args.sizes)
+    by_method = {}
+    for method in args.methods:
+        rec = {"floor_default": None, "floor_best": None,
+               "across_default": _range([]), "across_oracle": _range([])}
+        # same-N two-seed noise floor (default labels + oracle best layer)
+        try:
+            f0 = load_anchor(args.out_dir, method, ANCHOR, 0)
+            f1 = load_anchor(args.out_dir, method, ANCHOR, 1)
+            rec["floor_default"] = round(float(ari(f0["default"], f1["default"])), 3)
+            l0, l1 = _layers_of(f0), _layers_of(f1)
+            rec["floor_best"] = round(float(max(
+                (ari(a, b) for a, b in itertools.product(l0, l1)),
+                default=float("nan"))), 3)
+        except FileNotFoundError:
+            pass
+        # across-N agreement of the shared anchor (consecutive steps)
+        defaults, oracles = [], []
+        for ni, nj in zip(sizes[:-1], sizes[1:]):
+            try:
+                fi = load_anchor(args.out_dir, method, ni, 0)
+                fj = load_anchor(args.out_dir, method, nj, 0)
+            except FileNotFoundError:
+                continue
+            defaults.append(float(ari(fi["default"], fj["default"])))
+            li, lj = _layers_of(fi), _layers_of(fj)
+            oracles.append(float(max(
+                (ari(a, b) for a, b in itertools.product(li, lj)),
+                default=float("nan"))))
+        rec["across_default"] = _range(defaults)
+        rec["across_oracle"] = _range(oracles)
+        by_method[method] = rec
+
+    def _summary_row(key, label, short, field, attr):
+        row = {"key": key, "label": label, "short": short}
+        for method, plot_key in (("vanilla", "vanilla"), ("dire", "dire")):
+            rec = by_method.get(method, {})
+            if field in ("floor_default", "floor_best"):
+                row[f"{plot_key}_value"] = rec.get(field)
+            else:
+                rng = rec.get(field, {})
+                row[f"{plot_key}_value"] = rng.get("value")
+                row[f"{plot_key}_range"] = [rng.get("min"), rng.get("max")]
+        return row
+
+    summary = {
+        "_about": ("Stability of vanilla EVoC vs DiReEVoC under growing N, measured as the "
+                   "ARI of the shared 100k-point anchor as N grows. Wikipedia embeddings "
+                   "have no ground truth, so ARI here is self-consistency (each method judged "
+                   "against itself), not agreement with class labels. Produced by "
+                   "experiments/stability.py."),
+        "dataset": "Cohere/wikipedia-2023-11-embed-multilingual-v3 (en)",
+        "anchor": ANCHOR,
+        "sizes": sizes,
+        "metric": "adjusted_rand_index",
+        "methods": by_method,
+        "measurements": [
+            _summary_row("floor_default",
+                         "Noise floor: default labels\n(same N=100k, two seeds)",
+                         "floor (default)", "floor_default", None),
+            _summary_row("floor_best",
+                         "Noise floor: best layer\n(same N=100k, two seeds)",
+                         "floor (best layer)", "floor_best", None),
+            _summary_row("across_default",
+                         "Across N: default labels\n(100k -> 1M)",
+                         "across N (default)", "across_default", None),
+            _summary_row("across_oracle",
+                         "Across N: oracle best layer\n(100k -> 1M)",
+                         "across N (oracle layer)", "across_oracle", None),
+        ],
+    }
+    return summary
+
+
+def analyze(args):
+    sizes = sorted(args.sizes)
     Path(args.out_dir).mkdir(parents=True, exist_ok=True)
+    summary = measure(args)
 
     print("\n================ STABILITY (ARI on shared 100k anchor) ================")
     print("Noise floor = same data (N=100k), two seeds — instability only counts below this.\n")
-
     for method in args.methods:
+        rec = summary["methods"][method]
         print(f"---- {method} ----")
-        # noise floor
-        try:
-            a0 = load_anchor(args.out_dir, method, ANCHOR, 0)["default"]
-            a1 = load_anchor(args.out_dir, method, ANCHOR, 1)["default"]
-            floor = ari(a0, a1)
-            print(f"  noise floor (100k seed0 vs seed1) default-labels ARI = {floor:.3f}")
-        except FileNotFoundError:
-            floor = None
-            print("  noise floor: <missing>")
-
-        # default-labels stability across consecutive N
-        print("  default-labels ARI across N (consecutive):")
-        for ni, nj in zip(sizes[:-1], sizes[1:]):
-            try:
-                li = load_anchor(args.out_dir, method, ni, 0)
-                lj = load_anchor(args.out_dir, method, nj, 0)
-                a = ari(li["default"], lj["default"])
-                print(f"    {ni:>8} -> {nj:<8}  ARI={a:.3f}   "
-                      f"(ncl {ncl(li['default'])} -> {ncl(lj['default'])})")
-            except FileNotFoundError:
-                print(f"    {ni:>8} -> {nj:<8}  <missing>")
-
-        # oracle layer-matched stability: best ARI over all layer pairings
-        print("  oracle best-layer-matched ARI across N (confound check):")
-        for ni, nj in zip(sizes[:-1], sizes[1:]):
-            try:
-                fi, fj = load_anchor(args.out_dir, method, ni, 0), load_anchor(args.out_dir, method, nj, 0)
-            except FileNotFoundError:
-                print(f"    {ni:>8} -> {nj:<8}  <missing>")
-                continue
-            li = [fi[k] for k in fi.files if k.startswith("layer_") and k != "layer_ncl"]
-            lj = [fj[k] for k in fj.files if k.startswith("layer_") and k != "layer_ncl"]
-            best = max((ari(a, b) for a, b in itertools.product(li, lj)), default=float("nan"))
-            print(f"    {ni:>8} -> {nj:<8}  best-ARI={best:.3f}  "
-                  f"(layers {len(li)} x {len(lj)})")
+        print(f"  noise floor (100k seed0 vs seed1) default-labels ARI = {rec['floor_default']}")
+        print(f"  noise floor (100k seed0 vs seed1) best-layer    ARI = {rec['floor_best']}")
+        print(f"  default-labels ARI across N: {rec['across_default']['per_step']} "
+              f"(value {rec['across_default']['value']})")
+        print(f"  oracle best-layer ARI across N: {rec['across_oracle']['per_step']} "
+              f"(value {rec['across_oracle']['value']})")
         print()
+
+    if args.json_out:
+        out = Path(args.json_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(summary, indent=2) + "\n")
+        print(f"[stability] wrote {out}")
+    return summary
 
 
 def main() -> int:
@@ -167,6 +247,8 @@ def main() -> int:
     ap.add_argument("--methods", nargs="+", default=["vanilla", "dire"])
     ap.add_argument("--timeout", type=int, default=900)
     ap.add_argument("--analyze-only", action="store_true")
+    ap.add_argument("--json-out", default="experiments/stability_results.json",
+                    help="write the structured stability summary here (artifact for plotting)")
     args = ap.parse_args()
 
     if args.worker:

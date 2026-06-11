@@ -4,9 +4,10 @@ Scaling and stability at one million points
 A natural worry about clustering a million high-dimensional embeddings is that the base
 algorithm simply never returns. This page reports a direct measurement on real data that
 answers two questions: **does vanilla EVoC return at a million points, and is its
-clustering trustworthy at that scale?** The headline is that vanilla EVoC *does* return,
-quickly, but its labelling is not stable under growing data -- and that instability, not
-runtime, is what DiRe preprocessing fixes.
+clustering stable at that scale?** The headline is that vanilla EVoC *does* return, quickly,
+so runtime is not the concern. The concern is stability: its labelling shifts substantially
+as more data is added, and at this scale a clustering is only useful if it holds as the
+corpus grows. That stability, not the runtime, is what DiRe preprocessing improves.
 
 Setup
 -----
@@ -18,10 +19,15 @@ Setup
   ``evoc.EVoC`` runs its own NN-descent k-NN and Boruvka MST on CPU.
 - **Methods**: *vanilla* is ``evoc.EVoC().fit`` on the raw 1024-d vectors; *dire* is
   ``dire_evoc.DiReEVoC().fit``, which clusters an 8-d DiRe layout of the same vectors.
-- **Reproduce**: ``experiments/cache_embeddings.py``, then ``experiments/scale_compare.py``
-  (timing) and ``experiments/stability.py`` (stability). Each fit runs in an isolated
-  subprocess under a wall-clock watchdog, and a small warmup fit precedes every timed fit so
-  numba and cuVS JIT compilation are excluded from the reported time.
+- **Reproduce (push-button)**: ``scripts/run_remote_cuda_scaling.sh user@gpu-host`` mirrors
+  the general-benchmark remote runner — it syncs the tree, builds the CUDA image, runs
+  ``examples/run_cuda_scaling.py`` (cache → ``scale_compare`` → ``stability``) on the GPU,
+  rsyncs the artifact tree back to ``artifacts/cuda-scaling/``, and rebuilds the figures on
+  this page with ``scripts/plot_scaling_metrics.py --artifacts artifacts/cuda-scaling``. The
+  individual stages — ``experiments/cache_embeddings.py``, ``experiments/scale_compare.py``
+  (timing), ``experiments/stability.py`` (stability) — can also be run by hand. Each fit runs
+  in an isolated subprocess under a wall-clock watchdog, and a small warmup fit precedes every
+  timed fit so numba and cuVS JIT compilation are excluded from the reported time.
 
 Timing: both scale near-linearly, vanilla never stalls
 ------------------------------------------------------
@@ -55,6 +61,10 @@ Timing: both scale near-linearly, vanilla never stalls
      - 6
      - 1092
 
+.. image:: _static/benchmark_scaling_fit_seconds.svg
+   :alt: Fit time vs N for vanilla EVoC and DiReEVoC
+   :width: 100%
+
 Empirically the fit time grows as roughly :math:`N^{p}` with :math:`p \approx 1.13` for
 vanilla and :math:`p \approx 0.97` for dire -- both effectively linear. Vanilla clusters a
 million 1024-d vectors in **26 seconds**; the fear that it runs forever is unfounded.
@@ -66,6 +76,10 @@ dire stays in a tight band (1092 to 1557) with intrinsic dimension pinned at 11.
 across the whole range. That is the first sign that vanilla's *fast* answer is not a
 *stable* answer.
 
+.. image:: _static/benchmark_scaling_clusters.svg
+   :alt: Cluster count vs N for vanilla EVoC and DiReEVoC
+   :width: 100%
+
 Stability: ARI on a shared anchor set
 -------------------------------------
 
@@ -74,6 +88,10 @@ actually matters: as ``N`` grows from 100k to 1M, do those same anchor points ke
 cluster assignment, or does the labelling churn? We score this with the Adjusted Rand Index
 (ARI) of the anchor labels at one ``N`` against the next -- a label-invariant agreement
 measure. Each method is judged against itself.
+
+.. image:: _static/benchmark_scaling_stability_ari.svg
+   :alt: Stability ARI on a shared 100k anchor as N grows to 1M, vanilla EVoC vs DiReEVoC
+   :width: 100%
 
 Two confounds are controlled explicitly:
 

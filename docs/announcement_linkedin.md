@@ -24,6 +24,13 @@ OptDigits (**0.848 vs 0.147**) and PenDigits (**0.738 vs 0.125**); moons/circles
 feasible ties when both methods use
 `base_n_clusters=2` (**1.000 vs 1.000**); pure EVōC wins MNIST (**0.720 vs 0.813**) and
 slightly wins DBpedia-14 (**0.607 vs 0.623**).
+🔹 *Stability at a million points, on real unlabelled data.* A separate push-button pipeline
+clusters 1M Cohere-Wikipedia embeddings and tracks how a shared 100k anchor's labels agree
+with themselves as N grows 100k→1M. Both methods return fast (vanilla EVōC ~**26s**; DiRe→EVōC
+~10× slower, the layout step), so the number to read is the agreement across N: it's **~0**
+for vanilla EVōC (its own two-seed floor is 0.39) and **~0.5** for DiRe→EVōC (two-seed floor
+0.57 — so adding data moves it about as much as reseeding does). Same remote-run → download →
+plot flow as the supervised suite.
 🔹 *Intrinsic dimension, essentially free* — read straight off the k-NN graph DiRe already
 builds (TwoNN / Levina–Bickel), no second pass.
 🔹 *Out-of-sample `predict()`* — assign new points to existing clusters (EVōC itself has none).

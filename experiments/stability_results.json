@@ -1,0 +1,42 @@
+{
+  "_about": "Stability of vanilla EVoC vs DiReEVoC under growing N, measured as the Adjusted Rand Index (ARI) of the shared 100k-point anchor set as N grows 100k -> 1M. Wikipedia embeddings have no ground-truth labelling, so ARI here is self-consistency (each method judged against itself), not agreement with class labels. Produced by experiments/stability.py on a single NVIDIA GH200 over Cohere/wikipedia-2023-11-embed-multilingual-v3 (English), 1024-d. Values transcribed from the documented run; across-N entries are reported as ranges over the consecutive 100k->250k->500k->1M steps with a representative value used for plotting.",
+  "dataset": "Cohere/wikipedia-2023-11-embed-multilingual-v3 (en)",
+  "hardware": "NVIDIA GH200",
+  "anchor": 100000,
+  "sizes": [100000, 250000, 500000, 1000000],
+  "metric": "adjusted_rand_index",
+  "measurements": [
+    {
+      "key": "floor_default",
+      "label": "Noise floor: default labels\n(same N=100k, two seeds)",
+      "short": "floor (default)",
+      "vanilla_value": 0.39,
+      "dire_value": 0.57
+    },
+    {
+      "key": "floor_best",
+      "label": "Noise floor: best layer\n(same N=100k, two seeds)",
+      "short": "floor (best layer)",
+      "vanilla_value": 0.60,
+      "dire_value": 0.73
+    },
+    {
+      "key": "across_default",
+      "label": "Across N: default labels\n(100k -> 1M)",
+      "short": "across N (default)",
+      "vanilla_value": -0.06,
+      "vanilla_range": [-0.06, -0.06],
+      "dire_value": 0.51,
+      "dire_range": [0.48, 0.54]
+    },
+    {
+      "key": "across_oracle",
+      "label": "Across N: oracle best layer\n(100k -> 1M)",
+      "short": "across N (oracle layer)",
+      "vanilla_value": 0.49,
+      "vanilla_range": [0.45, 0.52],
+      "dire_value": 0.77,
+      "dire_range": [0.54, 1.00]
+    }
+  ]
+}
