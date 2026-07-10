@@ -6,13 +6,19 @@ clustering. Each is usable on its own; `DiReEVoC` runs the whole thing in one ca
 ## Install
 
 ```bash
-pip install -e .                                   # CPU cores (dimension, predict)
-pip install -e '.[rapids,dire,cluster]'            # + GPU SLT, DiRe reducer, EVoC layers
+python -m pip install -e .                            # CPU cores (dimension, predict)
+python -m pip install -e '.[rapids,dire,cluster]'     # RAPIDS already supplied by conda
+python -m pip install -e '.[rapids-cu12,dire,cluster]'  # clean pip environment, CUDA 12
+python -m pip install -e '.[rapids-cu13,dire,cluster]'  # clean pip environment, CUDA 13
 ```
 
 The pure-numpy cores import on any machine. `cuml`, `cupy`, `dire-rapids`, and `evoc` are
 imported lazily inside the functions that need them, so a CPU-only install of the base
 package still works for intrinsic-dimension and predict on precomputed neighbour data.
+The generic `rapids` extra adds only the `hdbscan` integration dependency and preserves a
+pre-installed conda RAPIDS stack. In a clean pip environment, choose exactly one
+CUDA-major extra. Never combine the CUDA 12 and CUDA 13 extras or add one to a conda RAPIDS
+environment, because duplicate CUDA package families can prevent cuML and CuPy imports.
 
 ## 1. One-call pipeline — `DiReEVoC`
 
@@ -36,9 +42,8 @@ distance), `base_min_cluster_size` (EVoC base-layer size, default 5 to match EVo
 `selector` (`"silhouette"` default, `"auto"` for guarded graph-component override,
 `"auto_ensemble"` for the confidence-gated variant, `"silhouette_raw"`, `"base"`, or
 `"none"`), `adaptive_min_samples` (retry density smoothing when a tight layout produces
-mostly noise), `merge_fragments` (merge adjacent selected-layer fragments using DiRe's
-original-space kNN graph), `graph_component_candidates` (make a stable small-k
-connected-component layer available to the auto selectors), `restarts` (default `1`;
+mostly noise), `graph_component_candidates` (make a stable small-k connected-component
+layer available to the auto selectors), `restarts` (default `1`;
 `>1` with `restart_combine="consensus"` runs N seeded fits and combines them by sparse
 co-association voting — see the benchmarks page for when it helps), and `use_gpu`
 (`"auto"`). Extra keywords are forwarded to `dire_rapids.create_dire` (e.g. `n_neighbors`,
@@ -95,6 +100,10 @@ from dire_evoc import prepare_reference, knn_vote_predict
 ref = prepare_reference(X_train)
 labels, membership = knn_vote_predict(prepare_reference(X_new), ref, train_labels, n_neighbors=15)
 ```
+
+The pipeline automatically uses its fitted cosine/euclidean metric. For direct Euclidean
+use, pass `metric="euclidean"` to both `prepare_reference` calls and to
+`knn_vote_predict`.
 
 ## 5. Benchmark suite
 

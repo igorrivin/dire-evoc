@@ -9,6 +9,7 @@ Install development dependencies and run the CPU test suite:
 .. code-block:: bash
 
    python -m pip install -e '.[dev]'
+   python -m ruff check src tests
    python -m pytest
 
 The pipeline smoke test imports ``cuml``, ``dire_rapids``, and ``evoc`` with

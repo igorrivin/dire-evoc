@@ -7,8 +7,8 @@ candidates that are structurally unsafe.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Sequence
 
 import numpy as np
 
@@ -60,7 +60,9 @@ def coverage_silhouette_score(Xs, lab_sample, *, raw: bool = False) -> float:
 
     lab_sample = np.asarray(lab_sample)
     mask = lab_sample >= 0
-    if np.unique(lab_sample[mask]).size < 2:
+    n_clustered = int(mask.sum())
+    n_labels = np.unique(lab_sample[mask]).size
+    if n_labels < 2 or n_labels >= n_clustered:
         return -np.inf
     score = float(silhouette_score(Xs[mask], lab_sample[mask]))
     if not raw:

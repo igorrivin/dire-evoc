@@ -9,7 +9,13 @@ These run on CPU with no GPU/cuml/dire dependency. The headline checks are:
 import numpy as np
 import pytest
 
-from dire_evoc.dimension import twonn, mle, intrinsic_dimension, _to_geodesic
+from dire_evoc.dimension import (
+    _to_geodesic,
+    intrinsic_dimension,
+    intrinsic_dimension_from_dire,
+    mle,
+    twonn,
+)
 
 
 def _cube(n, d, ambient, seed=0):
@@ -95,3 +101,47 @@ def test_to_geodesic_conversions():
 def test_bad_metric_raises():
     with pytest.raises(ValueError):
         _to_geodesic(np.array([[1.0, 2.0]]), "haversine")
+
+
+def test_intrinsic_dimension_from_dire_uses_metric_spec():
+    distances = np.array(
+        [[0.10, 0.21], [0.12, 0.20], [0.16, 0.25], [0.20, 0.36], [0.25, 0.48]]
+    )
+
+    class Reducer:
+        _knn_distances = distances
+        metric = "cosine"  # legacy attribute must not override current DiRe metadata
+        metric_spec = "euclidean"
+
+    expected = twonn(distances, metric="euclidean")["d"]
+    assert intrinsic_dimension_from_dire(Reducer()) == pytest.approx(expected)
+
+
+def test_intrinsic_dimension_from_dire_handles_squared_euclidean():
+    distances = np.array(
+        [[0.01, 0.04], [0.04, 0.09], [0.09, 0.25], [0.16, 0.36], [0.25, 0.64]]
+    )
+
+    class Reducer:
+        _knn_distances = distances
+        metric_spec = "sqeuclidean"
+
+    expected = twonn(np.sqrt(distances), metric="euclidean")["d"]
+    assert intrinsic_dimension_from_dire(Reducer()) == pytest.approx(expected)
+
+
+def test_explicit_cosine_uses_cosine_neighbor_search_for_unnormalized_data():
+    rng = np.random.default_rng(12)
+    X = rng.normal(size=(300, 6)) * rng.lognormal(size=(300, 1))
+
+    from sklearn.neighbors import NearestNeighbors
+
+    dist, _ = NearestNeighbors(n_neighbors=6, metric="cosine").fit(X).kneighbors(X)
+    expected = twonn(dist[:, 1:], metric="cosine")["d"]
+    assert intrinsic_dimension(X, k=5, metric="cosine") == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("fraction", [0.0, -0.1, 1.1])
+def test_twonn_rejects_invalid_fraction(fraction):
+    with pytest.raises(ValueError, match="fraction"):
+        twonn(np.array([[1.0, 2.0], [1.0, 3.0]]), fraction=fraction)

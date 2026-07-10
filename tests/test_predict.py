@@ -1,7 +1,9 @@
 """Out-of-sample kNN-vote predictor: self-consistency and held-out generalisation."""
 import numpy as np
+import pytest
 
-from dire_evoc.predict import prepare_reference, knn_vote_predict
+from dire_evoc import DiReEVoC
+from dire_evoc.predict import knn_vote_predict, prepare_reference
 
 
 def _blobs(n, k, d, spread, seed):
@@ -47,3 +49,58 @@ def test_noise_competes_as_label():
     ref = prepare_reference(X)
     labels, _ = knn_vote_predict(ref[:50], ref, y, n_neighbors=10)
     assert (labels[:50] == -1).mean() > 0.8
+
+
+def test_euclidean_prediction_preserves_magnitude_and_pipeline_metric():
+    reference = np.array([[1.0, 0.0], [90.0, 20.0]], dtype=np.float32)
+    query = np.array([[100.0, 1.0]], dtype=np.float32)
+    train_labels = np.array([10, 20])
+
+    cosine_labels, _ = knn_vote_predict(
+        prepare_reference(query),
+        prepare_reference(reference),
+        train_labels,
+        n_neighbors=1,
+    )
+    euclidean_labels, _ = knn_vote_predict(
+        prepare_reference(query, metric="euclidean"),
+        prepare_reference(reference, metric="euclidean"),
+        train_labels,
+        n_neighbors=1,
+        metric="euclidean",
+    )
+    assert cosine_labels.tolist() == [10]
+    assert euclidean_labels.tolist() == [20]
+
+    model = DiReEVoC(metric="euclidean")
+    model._reference_ = prepare_reference(reference, metric="euclidean")
+    model._reference_labels_ = train_labels
+    model._n_neighbors_ = 1
+    assert model.predict(query).tolist() == [20]
+
+
+def test_sparse_label_ids_do_not_require_dense_vote_columns():
+    reference = prepare_reference(np.eye(2, dtype=np.float32))
+    labels, membership = knn_vote_predict(
+        reference,
+        reference,
+        np.array([-1, 1_000_000_000]),
+        n_neighbors=1,
+    )
+    assert labels.tolist() == [-1, 1_000_000_000]
+    assert np.allclose(membership, 1.0)
+
+
+@pytest.mark.parametrize("n_neighbors", [0, -1, 1.5, True])
+def test_vote_rejects_invalid_neighbor_count(n_neighbors):
+    reference = prepare_reference(np.eye(2, dtype=np.float32))
+    with pytest.raises(ValueError, match="n_neighbors"):
+        knn_vote_predict(reference, reference, np.array([0, 1]), n_neighbors=n_neighbors)
+
+
+def test_vote_validates_reference_labels():
+    reference = prepare_reference(np.eye(2, dtype=np.float32))
+    with pytest.raises(ValueError, match="aligned"):
+        knn_vote_predict(reference, reference, np.array([0]), n_neighbors=1)
+    with pytest.raises(ValueError, match="no smaller"):
+        knn_vote_predict(reference, reference, np.array([-2, 0]), n_neighbors=1)
