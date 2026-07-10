@@ -29,6 +29,8 @@ METRIC -- CRITICAL. These estimators are *ratio*-based, so the distance metric m
           reported ID. Pass ``metric='cosine'`` (or ``'chordal'``) and the neighbour
           distances are converted to angles before estimation.
 """
+import operator
+
 import numpy as np
 
 __all__ = ["twonn", "mle", "intrinsic_dimension", "intrinsic_dimension_from_dire"]
@@ -43,6 +45,7 @@ def _to_geodesic(neighbor_dist, metric):
     metric:
       'euclidean' -- distances are already Euclidean; returned unchanged.
       'angular'   -- distances are already angles theta; returned unchanged.
+      'sqeuclidean' -- squared Euclidean distances; -> Euclidean distance.
       'cosine'    -- distances are cosine distance 1 - cos(theta); -> theta.
       'chordal'   -- distances are chordal Euclidean on the unit sphere
                      ||a - b|| = 2 sin(theta/2); -> theta.
@@ -50,6 +53,8 @@ def _to_geodesic(neighbor_dist, metric):
     d = np.asarray(neighbor_dist, dtype=np.float64)
     if metric in ("euclidean", "angular"):
         return d
+    if metric == "sqeuclidean":
+        return np.sqrt(np.maximum(d, 0.0))
     if metric == "cosine":
         cos = np.clip(1.0 - d, -1.0, 1.0)
         return np.arccos(cos)
@@ -58,7 +63,7 @@ def _to_geodesic(neighbor_dist, metric):
         return 2.0 * np.arcsin(np.clip(d / 2.0, -1.0, 1.0))
     raise ValueError(
         f"unknown metric {metric!r}; expected one of "
-        "'euclidean', 'angular', 'cosine', 'chordal'"
+        "'euclidean', 'sqeuclidean', 'angular', 'cosine', 'chordal'"
     )
 
 
@@ -73,7 +78,7 @@ def twonn(neighbor_dist, metric="euclidean", fraction=0.9):
     neighbor_dist : array (n_points, >=2)
         Per point, distances to neighbours sorted ascending; only the 1st and 2nd
         columns are used.
-    metric : {'euclidean','angular','cosine','chordal'}
+    metric : {'euclidean','sqeuclidean','angular','cosine','chordal'}
         Scale of the input distances (see module docstring); converted to geodesic.
     fraction : float in (0, 1]
         Lower fraction of the mu-CDF used for the straight-line fit (Facco's tail
@@ -85,6 +90,12 @@ def twonn(neighbor_dist, metric="euclidean", fraction=0.9):
     Pareto MLE d = N / sum log mu), and 'n_used'.
     """
     d = _to_geodesic(neighbor_dist, metric)
+    if d.ndim != 2 or d.shape[1] < 2:
+        raise ValueError("TwoNN needs a (n_points, >=2) distance array")
+    if not 0.0 < fraction <= 1.0:
+        raise ValueError("fraction must be in (0, 1]")
+    if not np.all(np.isfinite(d)) or np.any(d < 0):
+        raise ValueError("neighbor distances must be finite and non-negative")
     r1, r2 = d[:, 0], d[:, 1]
     good = r1 > 0
     mu = r2[good] / r1[good]
@@ -95,6 +106,8 @@ def twonn(neighbor_dist, metric="euclidean", fraction=0.9):
         raise ValueError("not enough non-degenerate points for TwoNN")
     F = np.arange(1, n + 1) / n
     keep = F < fraction
+    if not np.any(keep):
+        raise ValueError("fraction leaves no points for the TwoNN fit")
     x = np.log(mu[keep])
     y = -np.log1p(-F[keep])
     d_fit = float(np.dot(x, y) / np.dot(x, x))   # least-squares slope through origin
@@ -112,12 +125,25 @@ def mle(neighbor_dist, k=None, metric="euclidean"):
     Returns a plain float.
     """
     d = _to_geodesic(neighbor_dist, metric)
+    if d.ndim != 2:
+        raise ValueError("MLE needs a two-dimensional distance array")
+    if not np.all(np.isfinite(d)) or np.any(d < 0):
+        raise ValueError("neighbor distances must be finite and non-negative")
     if k is None:
         k = d.shape[1]
+    else:
+        try:
+            k = operator.index(k)
+        except TypeError as exc:
+            raise ValueError("k must be an integer") from exc
     if k < 3:
         raise ValueError("MLE needs k >= 3 neighbours")
+    if k > d.shape[1]:
+        raise ValueError(f"MLE requested k={k}, but only {d.shape[1]} neighbours are available")
     T = d[:, :k]
-    good = T[:, 0] > 0
+    good = np.all(T > 0, axis=1)
+    if not np.any(good):
+        raise ValueError("not enough non-degenerate points for MLE")
     logT = np.log(T[good])
     Tk = logT[:, k - 1:k]
     inv_m = np.sum(Tk - logT[:, :k - 1], axis=1) / (k - 1)
@@ -148,25 +174,63 @@ def intrinsic_dimension(X, k=20, method="twonn", metric="auto", normalize=None):
     from sklearn.neighbors import NearestNeighbors
 
     X = np.ascontiguousarray(X, dtype=np.float64)
+    if X.ndim != 2 or X.shape[0] < 2:
+        raise ValueError("X must be a two-dimensional array with at least two rows")
+    if not np.all(np.isfinite(X)):
+        raise ValueError("X must contain only finite values")
+    if metric not in {"auto", "euclidean", "cosine"}:
+        raise ValueError("metric must be one of 'auto', 'euclidean', or 'cosine'")
+    if method not in {"twonn", "mle"}:
+        raise ValueError(f"unknown method {method!r}")
+    try:
+        k = operator.index(k)
+    except TypeError as exc:
+        raise ValueError("k must be an integer") from exc
+    min_k = 2 if method == "twonn" else 3
+    if k < min_k:
+        raise ValueError(f"{method} needs k >= {min_k} neighbours")
+    if k >= X.shape[0]:
+        raise ValueError(f"k={k} must be smaller than the number of samples ({X.shape[0]})")
     if normalize:
         nrm = np.linalg.norm(X, axis=1, keepdims=True)
         nrm[nrm == 0] = 1.0
         X = X / nrm
+        metric = "cosine"
     if metric == "auto":
         unit = np.allclose(np.linalg.norm(X, axis=1), 1.0, atol=1e-4)
         metric = "cosine" if unit else "euclidean"
-    # neighbour search is in Euclidean space (on unit vectors this is the same
-    # ordering as cosine); the *ID metric* is applied via _to_geodesic.
-    nn = NearestNeighbors(n_neighbors=k + 1)
+    # Use the requested geometry for neighbour search. On normalized data cosine and
+    # chordal Euclidean have the same ordering, but cosine works correctly even when a
+    # caller explicitly requests it for data that were not pre-normalized.
+    nn = NearestNeighbors(n_neighbors=k, metric=metric)
     nn.fit(X)
-    dist, _ = nn.kneighbors(X)
-    dist = dist[:, 1:]                       # drop self
-    id_metric = "chordal" if metric == "cosine" else "euclidean"
+    # Omitting X asks sklearn for neighbours of the fitted samples while excluding each
+    # row's own index. This is robust to duplicate points, where self is not guaranteed
+    # to be the first zero-distance result.
+    dist, _ = nn.kneighbors()
+    id_metric = metric
     if method == "twonn":
         return twonn(dist, metric=id_metric)["d"]
     if method == "mle":
         return mle(dist, k=k, metric=id_metric)
-    raise ValueError(f"unknown method {method!r}")
+
+
+def _reducer_metric(reducer):
+    """Return the distance scale stored in a fitted DiRe neighbour graph."""
+    metric = getattr(reducer, "metric_spec", getattr(reducer, "metric", "cosine"))
+    if metric is None:
+        return "euclidean"
+    if not isinstance(metric, str):
+        raise ValueError("intrinsic dimension is unavailable for a callable DiRe metric")
+    metric = metric.strip().lower()
+    aliases = {"l2": "euclidean", "squared_euclidean": "sqeuclidean"}
+    metric = aliases.get(metric, metric)
+    if metric not in {"euclidean", "sqeuclidean", "angular", "cosine", "chordal"}:
+        raise ValueError(
+            f"intrinsic dimension is unavailable for DiRe metric {metric!r}; "
+            "use cosine, euclidean, or sqeuclidean"
+        )
+    return metric
 
 
 def intrinsic_dimension_from_dire(reducer, method="twonn", k=None):
@@ -189,8 +253,7 @@ def intrinsic_dimension_from_dire(reducer, method="twonn", k=None):
             "before estimating intrinsic dimension"
         )
     dist = np.sort(np.asarray(dist, dtype=np.float64), axis=1)
-    metric = getattr(reducer, "metric", "cosine")
-    id_metric = "cosine" if metric == "cosine" else "euclidean"
+    id_metric = _reducer_metric(reducer)
     if method == "twonn":
         return twonn(dist, metric=id_metric)["d"]
     if method == "mle":

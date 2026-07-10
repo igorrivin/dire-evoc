@@ -16,12 +16,12 @@ itself (``.layout_``) is the deliverable, not a hard partition -- inspect
 """
 import numpy as np
 
-from ._unionfind import UnionFind, components_from_edges
+from ._unionfind import components_from_edges
 from .consensus import consensus_labels
 from .dimension import intrinsic_dimension_from_dire
 from .predict import knn_vote_predict, prepare_reference
+from .selectors import best_layer as select_best_layer
 from .selectors import (
-    best_layer as select_best_layer,
     coverage_silhouette_score,
     guarded_graph_component_decision,
 )
@@ -37,7 +37,8 @@ class DiReEVoC:
     n_components : int, default=8
         Dimension of the DiRe layout that EVoC clusters.
     metric : str, default="cosine"
-        Metric for DiRe's kNN graph (and the intrinsic-dimension geodesic conversion).
+        Metric for DiRe's kNN graph, intrinsic-dimension conversion, and out-of-sample
+        voting. Prediction supports cosine, euclidean, and sqeuclidean.
     min_samples : int, default=10
         EVoC / HDBSCAN* core-distance parameter. Shared by the CPU and GPU paths.
     base_min_cluster_size : int, default=5
@@ -77,9 +78,8 @@ class DiReEVoC:
         Sweep radius around ``ceil(intrinsic_dimension) + 1`` for the graph-component
         candidate.
     graph_component_min_cluster_ratio : float, default=1.5
-        The post-merge EVoC selected layer must have at least this many clusters per
-        graph component before the graph candidate overrides it, unless
-        ``base_n_clusters`` is set and matched.
+        The EVoC-selected layer must have at least this many clusters per graph component
+        before the graph candidate overrides it, unless ``base_n_clusters`` is matched.
     n_neighbors_predict : int or None
         Neighbours for the out-of-sample vote; defaults to the DiRe ``n_neighbors``.
     random_state : int or None
@@ -272,10 +272,13 @@ class DiReEVoC:
 
         n = knn_indices.shape[0]
         max_k = knn_indices.shape[1]
-        try:
-            intrinsic_dim = intrinsic_dimension_from_dire(reducer, method="twonn")
-        except Exception:
-            intrinsic_dim = None
+        if hasattr(self, "intrinsic_dimension_"):
+            intrinsic_dim = self.intrinsic_dimension_
+        else:
+            try:
+                intrinsic_dim = intrinsic_dimension_from_dire(reducer, method="twonn")
+            except Exception:
+                intrinsic_dim = None
         center = 3 if intrinsic_dim is None else int(np.ceil(intrinsic_dim)) + 1
         radius = int(max(0, self.graph_component_k_radius))
         k_values = [
@@ -462,170 +465,6 @@ class DiReEVoC:
                 best = (sc, si, ls, lm, lp, ms, bmc)
         return best
 
-    def _fragment_merge_labels(self, labels, knn_indices):
-        """Merge selected-layer fragments using DiRe's original-space kNN graph.
-
-        This is deliberately graph-local rather than a generic penalty for high ``k``:
-        many separated blobs in low intrinsic dimension should stay separate. We only
-        union two selected clusters when they have enough *reciprocal* cross-neighbour
-        evidence in the existing kNN graph, the signature of adjacent pieces of one
-        continuous component.
-        """
-        labels = np.asarray(labels)
-        if knn_indices is None:
-            return labels, {"merged": False, "reason": "missing_knn"}
-        knn_indices = np.asarray(knn_indices)
-        if knn_indices.ndim != 2 or knn_indices.shape[0] != labels.shape[0]:
-            return labels, {"merged": False, "reason": "bad_knn_shape"}
-
-        active = labels >= 0
-        unique = np.unique(labels[active])
-        if unique.size < 3:
-            return labels, {"merged": False, "reason": "too_few_clusters"}
-
-        label_to_pos = {int(label): i for i, label in enumerate(unique)}
-        pos_to_label = {i: int(label) for label, i in label_to_pos.items()}
-        sizes = np.array([np.sum(labels == label) for label in unique], dtype=np.int64)
-        directed = {}
-        noise_bridges = {}
-        for i, lab in enumerate(labels):
-            if lab < 0:
-                neighbour_labels = []
-                for j in knn_indices[i]:
-                    if j < 0 or j >= labels.shape[0] or j == i:
-                        continue
-                    other = labels[int(j)]
-                    if other >= 0:
-                        neighbour_labels.append(label_to_pos[int(other)])
-                for offset, a in enumerate(sorted(set(neighbour_labels))):
-                    for b in sorted(set(neighbour_labels))[offset + 1:]:
-                        key = (a, b) if a < b else (b, a)
-                        noise_bridges[key] = noise_bridges.get(key, 0) + 1
-                continue
-            a = label_to_pos[int(lab)]
-            for j in knn_indices[i]:
-                if j < 0 or j >= labels.shape[0] or j == i:
-                    continue
-                other = labels[int(j)]
-                if other < 0 or other == lab:
-                    continue
-                b = label_to_pos[int(other)]
-                directed[(a, b)] = directed.get((a, b), 0) + 1
-
-        uf = UnionFind(unique.size)
-
-        merged_edges = 0
-        for (a, b), count_ab in list(directed.items()):
-            if a >= b:
-                continue
-            reciprocal_edges = min(count_ab, directed.get((b, a), 0))
-            if reciprocal_edges < self.fragment_merge_min_edges:
-                continue
-            smaller = max(1, int(min(sizes[a], sizes[b])))
-            if reciprocal_edges / smaller >= self.fragment_merge_edge_fraction:
-                uf.union(a, b)
-                merged_edges += 1
-
-        bridge_edges = 0
-        for (a, b), bridge_count in noise_bridges.items():
-            if bridge_count >= self.fragment_merge_min_edges:
-                uf.union(a, b)
-                bridge_edges += 1
-
-        roots = np.array([uf.find(i) for i in range(unique.size)])
-        if np.unique(roots).size == unique.size:
-            return labels, {
-                "merged": False,
-                "reason": "no_strong_adjacencies",
-                "candidate_edges": int(len(directed)),
-                "candidate_bridges": int(len(noise_bridges)),
-            }
-
-        root_to_new = {
-            root: new_label
-            for new_label, root in enumerate(sorted(np.unique(roots)))
-        }
-        merged_labels = labels.copy()
-        for old_pos, old_label in pos_to_label.items():
-            merged_labels[labels == old_label] = root_to_new[uf.find(old_pos)]
-        return merged_labels, {
-            "merged": True,
-            "merged_edges": int(merged_edges),
-            "bridge_edges": int(bridge_edges),
-            "clusters_before": int(unique.size),
-            "clusters_after": int(np.unique(merged_labels[merged_labels >= 0]).size),
-        }
-
-    def _maybe_merge_fragments(
-        self,
-        layout,
-        layers,
-        membership_layers,
-        persistence,
-        selected_layer,
-        reducer,
-    ):
-        if not (
-            self.merge_fragments
-            and self.selector in {"silhouette", "auto", "auto_ensemble"}
-        ):
-            return layers, membership_layers, persistence, selected_layer, {
-                "merged": False,
-                "reason": "disabled",
-            }
-        if selected_layer == getattr(self, "graph_component_layer_", None):
-            return layers, membership_layers, persistence, selected_layer, {
-                "merged": False,
-                "reason": "graph_component_layer",
-            }
-
-        merged_labels, info = self._fragment_merge_labels(
-            layers[selected_layer],
-            getattr(reducer, "_knn_indices", None),
-        )
-        if not info.get("merged"):
-            return layers, membership_layers, persistence, selected_layer, info
-
-        base_score = self._layer_score(layout, layers[selected_layer])
-        merged_score = self._layer_score(layout, merged_labels)
-        clusters_after = int(np.unique(merged_labels[merged_labels >= 0]).size)
-        if clusters_after < 2:
-            info = dict(info)
-            info.update(
-                {
-                    "merged": False,
-                    "reason": "collapsed_to_one_cluster",
-                    "base_score": float(base_score),
-                    "merged_score": float(merged_score),
-                }
-            )
-            return layers, membership_layers, persistence, selected_layer, info
-        if (
-            np.isfinite(base_score)
-            and base_score > 0
-            and (
-                not np.isfinite(merged_score)
-                or merged_score < base_score * self.fragment_merge_min_score_ratio
-            )
-        ):
-            info = dict(info)
-            info.update(
-                {
-                    "merged": False,
-                    "reason": "score_loss_too_large",
-                    "base_score": float(base_score),
-                    "merged_score": float(merged_score),
-                }
-            )
-            return layers, membership_layers, persistence, selected_layer, info
-
-        info = dict(info)
-        info.update({"base_score": float(base_score), "merged_score": float(merged_score)})
-        layers = list(layers) + [merged_labels]
-        membership_layers = list(membership_layers) + [membership_layers[selected_layer]]
-        persistence = list(persistence) + [np.nan]
-        return layers, membership_layers, persistence, len(layers) - 1, info
-
     # -- API -----------------------------------------------------------------
     def fit(self, X, y=None):
         """Fit the pipeline.
@@ -676,12 +515,31 @@ class DiReEVoC:
 
     def _fit_once(self, X, on_gpu, seed):
         self.graph_component_layer_ = None
+        graph_enabled = bool(
+            self.graph_component_candidates and self.selector in {"auto", "auto_ensemble"}
+        )
+        if graph_enabled:
+            graph_reason = "not_evaluated"
+        elif self.graph_component_candidates:
+            graph_reason = "disabled_for_selector"
+        else:
+            graph_reason = "disabled"
         self.graph_component_candidate_ = {
-            "enabled": bool(self.graph_component_candidates),
+            "enabled": graph_enabled,
             "accepted": False,
-            "reason": "not_evaluated",
+            "reason": graph_reason,
         }
         self.layout_, self.reducer_ = self._build_layout(X, seed=seed)
+        # Compute the graph-derived ID once. Auto selectors reuse this value when choosing
+        # graph-component k values; the ordinary silhouette path avoids that graph sweep.
+        try:
+            self.intrinsic_dimension_ = intrinsic_dimension_from_dire(
+                self.reducer_, method="twonn"
+            )
+            self.intrinsic_dimension_error_ = None
+        except Exception as exc:
+            self.intrinsic_dimension_ = None
+            self.intrinsic_dimension_error_ = exc
         layers, membership_layers, persistence = self._cluster(self.layout_, on_gpu)
         sel, score = self._best_layer(self.layout_, layers)
         (
@@ -701,16 +559,14 @@ class DiReEVoC:
             sel,
             score,
         )
-        layers, membership_layers, persistence = self._maybe_add_graph_component_layer(
-            self.reducer_,
-            layers,
-            membership_layers,
-            persistence,
-        )
-        if (
-            getattr(self, "graph_component_layer_", None) is not None
-            and self.selector in {"auto", "auto_ensemble"}
-        ):
+        if graph_enabled:
+            layers, membership_layers, persistence = self._maybe_add_graph_component_layer(
+                self.reducer_,
+                layers,
+                membership_layers,
+                persistence,
+            )
+        if getattr(self, "graph_component_layer_", None) is not None:
             use_graph, graph_info = self._should_select_graph_component_layer(
                 layers[sel],
                 layers[self.graph_component_layer_],
@@ -719,7 +575,6 @@ class DiReEVoC:
             self.graph_component_candidate_ = graph_info
             if use_graph:
                 sel = self.graph_component_layer_
-                score = self._layer_score(self.layout_, layers[sel])
 
         self.cluster_layers_ = layers
         self.membership_strength_layers_ = membership_layers
@@ -728,19 +583,18 @@ class DiReEVoC:
         self.labels_ = layers[sel]
         self.membership_ = membership_layers[sel]
 
-        # free intrinsic dimension off DiRe's existing kNN graph
-        try:
-            self.intrinsic_dimension_ = intrinsic_dimension_from_dire(
-                self.reducer_, method="twonn")
-        except Exception:
-            self.intrinsic_dimension_ = None
-
         # retain a metric-prepared reference for out-of-sample predict
         if X.dtype in (np.float32, np.float64):
-            self._reference_ = prepare_reference(X)
-            self._reference_labels_ = self.labels_
+            try:
+                self._reference_ = prepare_reference(X, metric=self.metric)
+                self._reference_labels_ = self.labels_
+                self._prediction_metric_error_ = None
+            except ValueError as exc:
+                self._reference_ = None
+                self._prediction_metric_error_ = exc
         else:
             self._reference_ = None
+            self._prediction_metric_error_ = None
         self._n_neighbors_ = (
             self.n_neighbors_predict
             if self.n_neighbors_predict is not None
@@ -756,10 +610,10 @@ class DiReEVoC:
         the original embedding space (noise competes as a label)."""
         if getattr(self, "_reference_", None) is None:
             raise NotImplementedError(
-                "predict supports float embeddings (cosine metric); the model was fit "
-                "on non-float data."
+                "predict supports float embeddings with cosine, euclidean, or "
+                f"sqeuclidean metrics; this model uses {self.metric!r}."
             )
-        query = prepare_reference(np.ascontiguousarray(X))
+        query = prepare_reference(np.ascontiguousarray(X), metric=self.metric)
         if query.shape[1] != self._reference_.shape[1]:
             raise ValueError(
                 f"X has {query.shape[1]} features, but the model was fit on "
@@ -767,5 +621,10 @@ class DiReEVoC:
             )
         k = self._n_neighbors_ if n_neighbors is None else n_neighbors
         labels, membership = knn_vote_predict(
-            query, self._reference_, self._reference_labels_, k)
+            query,
+            self._reference_,
+            self._reference_labels_,
+            k,
+            metric=self.metric,
+        )
         return (labels, membership) if return_membership else labels

@@ -166,18 +166,21 @@ this sweep make the split concrete (MNIST full, one fit):
 | EVoC clustering | 1.6s | 25.2s (whole fit) |
 | Layer selection | 1.5s | — |
 | Adaptive smoothing | 24.6s | — |
-| Fragment merge | 61.7s | — |
 | Graph-component stage | 17.7s | — |
-| **Total fit** | **124.8s** | **25.2s** |
+| **Total fit** | **63.1s** | **25.2s** |
+
+(These timings came from a pre-removal benchmark run. The unsafe `merge_fragments`
+post-process, which cost 61.7s in that run, has since been removed; re-run the suite to
+refresh the absolute totals.)
 
 (Single-run, cold timings; the repeated-timing suite in `docs/benchmarks.md` reports warm
 means, where pure EVoC's MNIST fit is a few seconds.) Two things follow. First, the
-embedding is a real, irreducible cost that pure EVoC does not pay (~17s here, ~14% of the
-fit) — but it is also what buys the quality on hard manifolds and yields a reusable layout
-for visualization and out-of-sample prediction. Second, on large data most of DiReEVoC's
-wall time is not the embedding at all but the DiRe-specific layer post-processing (adaptive
-smoothing + fragment merge ≈ 86s here). The warm pure-EVoC baseline is the one to keep in
-mind: DiReEVoC is the much slower method
+embedding is a real, irreducible cost that pure EVoC does not pay (~17s here, ~28% of the
+adjusted fit) — but it is also what buys the quality on hard manifolds and yields a reusable
+layout for visualization and out-of-sample prediction. Second, on large data a large share
+of DiReEVoC's wall time is not the embedding at all but the DiRe-specific layer
+post-processing (adaptive smoothing ≈ 25s here). The warm pure-EVoC baseline is the one to
+keep in mind: DiReEVoC is the much slower method
 and only earns its cost where the layout is a materially better substrate than the raw
 vectors (e.g. OptDigits/PenDigits/Segment, where the matched delta is large).
 
@@ -206,15 +209,28 @@ python -m pip install -e .
 The base package supports the CPU-tested pieces: intrinsic-dimension utilities,
 out-of-sample voting, and package imports.
 
-Full GPU pipeline install:
+For a pre-existing RAPIDS environment (including a conda CUDA 13 environment), keep the
+environment's cuML, cuVS, and CuPy packages and install only the integration dependencies:
 
 ```bash
+conda activate rapids-26.06
 python -m pip install -e '.[rapids,dire,cluster]'
 ```
 
-Those extras pull in the packages needed by `DiReEVoC` and `dire_evoc.hybrid`. RAPIDS
-packages are CUDA-version-specific, so many users will prefer to install them in a RAPIDS
-conda environment first and then install this project editable.
+The generic `rapids` extra deliberately does not install CUDA wheels, so it will not replace
+the RAPIDS packages managed by conda. It adds the CPU `hdbscan` bridge used to expose
+cuML's fitted single-linkage tree.
+
+For a clean, pip-managed environment, select exactly one CUDA-major extra:
+
+```bash
+python -m pip install -e '.[rapids-cu12,dire,cluster]'  # CUDA 12
+python -m pip install -e '.[rapids-cu13,dire,cluster]'  # CUDA 13
+```
+
+Do not combine the CUDA 12 and CUDA 13 extras, and do not add either one to a conda RAPIDS
+environment. Mixing conda RAPIDS packages with a second set of pip CUDA wheels can leave
+cuML and CuPy unable to import.
 
 Documentation build dependencies:
 

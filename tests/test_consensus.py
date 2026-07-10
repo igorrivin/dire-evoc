@@ -3,9 +3,9 @@ import numpy as np
 import pytest
 
 from dire_evoc.consensus import (
+    _canonical_pairs_for_run,
     consensus_labels,
     consensus_over_restarts,
-    _canonical_pairs_for_run,
 )
 
 
@@ -69,6 +69,13 @@ def test_no_agreement_all_singletons():
     assert np.all(out == -1)
 
 
+def test_unanimous_noise_stays_noise_with_default_minimum():
+    labs = [np.array([-1, -1, -1]), np.array([-1, -1, -1])]
+    nbrs = np.array([[1, 2], [0, 2], [0, 1]])
+    out = consensus_labels(labs, [nbrs, nbrs])
+    assert np.all(out == -1)
+
+
 def test_consensus_over_restarts_with_stub_run_fn():
     nbrs = np.array([[1, 2], [0, 2], [0, 1], [4, 5], [3, 5], [3, 4]])
     seeds = []
@@ -103,3 +110,5 @@ def test_input_validation():
         consensus_labels([np.zeros(3)], [])
     with pytest.raises(ValueError, match="same points"):
         consensus_labels([np.zeros(3), np.zeros(4)], [np.zeros((3, 2)), np.zeros((4, 2))])
+    with pytest.raises(ValueError, match="threshold"):
+        consensus_labels([np.zeros(3)], [np.zeros((3, 2))], threshold=1.1)

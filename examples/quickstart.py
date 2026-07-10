@@ -26,6 +26,10 @@ def gaussian_blobs(n=12_000, k=8, d=32, spread=0.10, seed=0):
 
 def main():
     X, y = gaussian_blobs()
+    # gaussian_blobs returns class-contiguous blocks; shuffle before splitting so both
+    # partitions represent every class and the reported held-out ARI is meaningful.
+    order = np.random.default_rng(0).permutation(X.shape[0])
+    X, y = X[order], y[order]
     X_train, X_test = X[:10_000], X[10_000:]
     y_train, y_test = y[:10_000], y[10_000:]
 

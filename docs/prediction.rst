@@ -10,12 +10,15 @@ How it works
 
 ``knn_vote_predict``:
 
-1. L2-normalizes reference and query embeddings with ``prepare_reference``.
-2. Finds nearest training points by cosine similarity.
+1. Prepares reference and query embeddings with ``prepare_reference``. Cosine inputs are
+   L2-normalized; Euclidean inputs retain their magnitude.
+2. Finds nearest training points with the selected metric.
 3. Gives each neighbour an inverse-distance vote.
 4. Returns the label with the most vote weight and that label's membership share.
 
 Noise label ``-1`` participates like any other label.
+``DiReEVoC.predict`` automatically reuses the fitted model's metric. Direct callers must
+pass the same ``metric`` to both preparation and voting.
 
 Pipeline use
 ------------
@@ -41,6 +44,16 @@ Direct use
        reference,
        train_labels,
        n_neighbors=15,
+   )
+
+For Euclidean embeddings, preserve magnitude explicitly:
+
+.. code-block:: python
+
+   reference = prepare_reference(X_train, metric="euclidean")
+   query = prepare_reference(X_new, metric="euclidean")
+   labels, membership = knn_vote_predict(
+       query, reference, train_labels, n_neighbors=15, metric="euclidean"
    )
 
 Scaling notes

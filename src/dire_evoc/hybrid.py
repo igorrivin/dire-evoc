@@ -20,6 +20,8 @@ default ``brute_force`` is O(n^2) -- pass ``nn_descent`` at scale; and feeding a
 array triggers a slower RAFT MST-reconnection path on well-separated data -- feed a host
 numpy array (the H2D copy is trivial).
 """
+import operator
+
 import numpy as np
 
 __all__ = ["gpu_single_linkage_tree", "hybrid_cluster_layers"]
@@ -44,9 +46,23 @@ def gpu_single_linkage_tree(layout, min_samples=10, build_algo="nn_descent",
         kNN construction. 'nn_descent' (approximate, sub-quadratic) is required at
         scale; 'brute_force' is exact but O(n^2).
     """
+    X = np.ascontiguousarray(np.asarray(layout), dtype=np.float32)   # host array
+    if X.ndim != 2 or X.shape[0] < 2:
+        raise ValueError("layout must be a two-dimensional array with at least two rows")
+    if not np.all(np.isfinite(X)):
+        raise ValueError("layout must contain only finite values")
+    if isinstance(min_samples, (bool, np.bool_)):
+        raise ValueError("min_samples must be a positive integer")
+    try:
+        min_samples = operator.index(min_samples)
+    except TypeError as exc:
+        raise ValueError("min_samples must be a positive integer") from exc
+    if min_samples < 1:
+        raise ValueError("min_samples must be a positive integer")
+    if build_algo not in {"nn_descent", "brute_force"}:
+        raise ValueError("build_algo must be 'nn_descent' or 'brute_force'")
     from cuml.cluster import HDBSCAN
 
-    X = np.ascontiguousarray(np.asarray(layout), dtype=np.float32)   # host array
     model = HDBSCAN(min_samples=min_samples, min_cluster_size=max(2, min_samples),
                     metric=metric, build_algo=build_algo)
     model.fit(X)
@@ -169,9 +185,6 @@ def hybrid_cluster_layers(layout, min_samples=10, build_algo="nn_descent", **kwa
     that parameter, so the fallback calls the same EVoC tree utility functions directly.
     """
     metric = kwargs.pop("metric", "euclidean")
-    slt = gpu_single_linkage_tree(layout, min_samples=min_samples,
-                                  build_algo=build_algo,
-                                  metric=metric)
     try:
         from evoc.clustering import build_cluster_layers
     except ImportError as exc:                                   # pragma: no cover
@@ -181,15 +194,37 @@ def hybrid_cluster_layers(layout, min_samples=10, build_algo="nn_descent", **kwa
         ) from exc
 
     import inspect
-    if "precomputed_linkage" in inspect.signature(build_cluster_layers).parameters:
+
+    has_precomputed_seam = (
+        "precomputed_linkage" in inspect.signature(build_cluster_layers).parameters
+    )
+    fallback_kwargs = None
+    if not has_precomputed_seam:
+        fallback_kwargs = {
+            "base_min_cluster_size": kwargs.pop("base_min_cluster_size", 10),
+            "base_n_clusters": kwargs.pop("base_n_clusters", None),
+            "min_similarity_threshold": kwargs.pop("min_similarity_threshold", 0.2),
+            "max_layers": kwargs.pop("max_layers", 10),
+        }
+        if kwargs:
+            unsupported = ", ".join(sorted(kwargs))
+            raise TypeError(
+                f"installed EVoC lacks the precomputed_linkage API; unsupported hybrid "
+                f"keyword(s): {unsupported}"
+            )
+
+    slt = gpu_single_linkage_tree(
+        layout,
+        min_samples=min_samples,
+        build_algo=build_algo,
+        metric=metric,
+    )
+    if has_precomputed_seam:
         return build_cluster_layers(layout, precomputed_linkage=slt,
                                     min_samples=min_samples, **kwargs)
 
     return _cluster_layers_from_linkage(
         slt,
         np.asarray(layout).shape[0],
-        base_min_cluster_size=kwargs.pop("base_min_cluster_size", 10),
-        base_n_clusters=kwargs.pop("base_n_clusters", None),
-        min_similarity_threshold=kwargs.pop("min_similarity_threshold", 0.2),
-        max_layers=kwargs.pop("max_layers", 10),
+        **fallback_kwargs,
     )

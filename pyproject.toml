@@ -20,6 +20,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 # Pure-numpy cores (dimension, predict, pipeline orchestration) need only these; the
 # GPU/cluster dependencies are imported lazily inside the functions that use them.
@@ -34,9 +36,23 @@ dependencies = [
 cluster = ["evoc"]
 # DiRe-RAPIDS reducer (provides the GPU layout + kNN graph)
 dire = ["dire-rapids"]
-# GPU single-linkage tree + device kNN. cuML exposes the fitted single-linkage tree
-# through the CPU hdbscan package, so it is part of the practical RAPIDS runtime.
-rapids = ["cuml-cu12>=23.0.0", "cuvs-cu12>=23.0.0", "cupy-cuda12x>=10.0.0", "hdbscan>=0.8.40"]
+# Integration support for an environment where RAPIDS itself is already installed (for
+# example, a conda RAPIDS environment). This intentionally does not install CUDA wheels.
+rapids = ["hdbscan>=0.8.40"]
+# Complete pip-managed RAPIDS stacks. Pick exactly one matching the environment's CUDA
+# major; cuML exposes its fitted single-linkage tree through the CPU hdbscan package.
+rapids-cu12 = [
+    "cuml-cu12>=26.2,<27",
+    "cuvs-cu12>=26.2,<27",
+    "cupy-cuda12x>=14,<15",
+    "hdbscan>=0.8.40",
+]
+rapids-cu13 = [
+    "cuml-cu13>=26.2,<27",
+    "cuvs-cu13>=26.2,<27",
+    "cupy-cuda13x>=14,<15",
+    "hdbscan>=0.8.40",
+]
 dev = ["pytest>=7.0.0", "pytest-cov", "pytest-timeout>=2.1.0", "black", "ruff"]
 docs = ["sphinx>=7.0.0", "matplotlib>=3.8.0"]
 
@@ -52,7 +68,7 @@ testpaths = ["tests"]
 
 [tool.black]
 line-length = 100
-target-version = ["py310", "py311", "py312"]
+target-version = ["py310", "py311", "py312", "py313", "py314"]
 
 [tool.ruff]
 line-length = 100

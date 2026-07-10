@@ -14,6 +14,8 @@ package union-find (no n x n matrix is ever built). Components smaller than
 """
 from __future__ import annotations
 
+import operator
+
 import numpy as np
 
 from ._unionfind import components_from_edges
@@ -78,9 +80,20 @@ def consensus_labels(labelings, neighbor_lists, threshold=0.5, min_cluster_size=
         raise ValueError("need at least one run")
     if len(neighbor_lists) != n_runs:
         raise ValueError("need one neighbor graph per labeling")
-    n = np.asarray(labelings[0]).shape[0]
-    if any(np.asarray(lab).shape[0] != n for lab in labelings):
+    arrays = [np.asarray(lab) for lab in labelings]
+    if arrays[0].ndim != 1:
+        raise ValueError("all labelings must be one-dimensional")
+    n = arrays[0].shape[0]
+    if any(lab.ndim != 1 or lab.shape[0] != n for lab in arrays):
         raise ValueError("all labelings must cover the same points in the same order")
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError("threshold must be in [0, 1]")
+    try:
+        min_cluster_size = operator.index(min_cluster_size)
+    except TypeError as exc:
+        raise ValueError("min_cluster_size must be a positive integer") from exc
+    if min_cluster_size < 1:
+        raise ValueError("min_cluster_size must be a positive integer")
 
     per_run = [_canonical_pairs_for_run(labelings[r], neighbor_lists[r]) for r in range(n_runs)]
     per_run = [p for p in per_run if p.shape[0]]
@@ -92,6 +105,12 @@ def consensus_labels(labelings, neighbor_lists, threshold=0.5, min_cluster_size=
         edges = np.empty((0, 2), dtype=np.int64)  # no agreement -> all singletons
 
     labels = components_from_edges(n, edges)
+    # An isolated graph node can be a legitimate singleton cluster when the caller
+    # explicitly allows size one, but a point labelled noise in every restart must never
+    # be promoted to a synthetic singleton cluster merely because union-find labels every
+    # node. Preserve unanimous noise before compacting component ids.
+    ever_clustered = np.any(np.stack([lab >= 0 for lab in arrays], axis=0), axis=0)
+    labels[~ever_clustered] = -1
     return _finalize(labels, min_cluster_size)
 
 

@@ -20,15 +20,29 @@ Full GPU pipeline
 -----------------
 
 The one-call ``DiReEVoC`` pipeline and the hybrid GPU clustering bridge need the optional
-DiRe, EVoC, and RAPIDS dependencies:
+DiRe, EVoC, and RAPIDS dependencies. If RAPIDS is already installed, as it is in a conda
+RAPIDS CUDA 13 environment, preserve that environment's cuML, cuVS, and CuPy packages:
 
 .. code-block:: bash
 
+   conda activate rapids-26.06
    python -m pip install -e '.[rapids,dire,cluster]'
 
-RAPIDS packages are tied to CUDA and Python versions. In practice, it is often easier to
-create a compatible RAPIDS environment first, then install ``dire-evoc`` into that
-environment.
+The generic ``rapids`` extra installs ``hdbscan``, which cuML uses to expose the fitted
+single-linkage tree, but deliberately does not install any CUDA wheels. This avoids
+replacing packages managed by conda.
+
+For a clean, pip-managed environment, select exactly one extra matching the CUDA major:
+
+.. code-block:: bash
+
+   python -m pip install -e '.[rapids-cu12,dire,cluster]'  # CUDA 12
+   python -m pip install -e '.[rapids-cu13,dire,cluster]'  # CUDA 13
+
+Do not combine the CUDA 12 and CUDA 13 extras, and do not install either CUDA-major extra
+into a conda RAPIDS environment. Mixing conda RAPIDS packages with a second set of pip
+CUDA wheels can leave cuML and CuPy unable to import. RAPIDS packages are also tied to
+Python versions, so use a Python version supported by the selected RAPIDS release.
 
 CUDA Docker repro
 -----------------

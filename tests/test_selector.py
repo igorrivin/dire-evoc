@@ -10,6 +10,7 @@ import numpy as np
 
 from dire_evoc import DiReEVoC
 from dire_evoc.selectors import (
+    coverage_silhouette_score,
     guarded_graph_component_decision,
     or_probability,
 )
@@ -64,6 +65,11 @@ def test_base_and_none_selectors():
     layers = [noise_dumping, clean]
     assert DiReEVoC(selector="base")._select_layer(layout, layers) == 0
     assert DiReEVoC(selector="none")._select_layer(layout, layers) == len(layers) - 1
+
+
+def test_silhouette_rejects_one_label_per_point_without_sklearn_error():
+    X = np.arange(6, dtype=float)[:, None]
+    assert coverage_silhouette_score(X, np.arange(6)) == -np.inf
 
 
 def _knn_indices(X, k=10):
@@ -158,3 +164,27 @@ def test_auto_ensemble_keeps_hard_binary_graph_guard():
     assert not decision.selected
     assert decision.reason == "too_few_graph_clusters_without_base_n_clusters"
     assert decision.diagnostics["graph_confidence"] == 0.0
+
+
+def test_default_selector_skips_graph_component_sweep(monkeypatch):
+    layout = np.array([[0.0], [0.1], [10.0], [10.1]], dtype=np.float32)
+    labels = np.array([0, 0, 1, 1])
+    model = DiReEVoC(selector="silhouette", adaptive_min_samples=False)
+
+    class Reducer:
+        n_neighbors = 2
+
+    monkeypatch.setattr(model, "_build_layout", lambda X, seed=None: (layout, Reducer()))
+    monkeypatch.setattr(
+        model,
+        "_cluster",
+        lambda layout, on_gpu: ([labels], [np.ones(4)], [0.0]),
+    )
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("ordinary silhouette selection must not build graph candidates")
+
+    monkeypatch.setattr(model, "_maybe_add_graph_component_layer", fail_if_called)
+    model._fit_once(np.asarray(layout), on_gpu=False, seed=0)
+
+    assert model.graph_component_candidate_["reason"] == "disabled_for_selector"
