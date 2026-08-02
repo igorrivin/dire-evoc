@@ -1,12 +1,46 @@
-`dire-evoc`: density clustering (EVōC) on GPU DiRe layouts.
+# X announcement
 
-• 18-dataset CUDA repro with matched EVoC base controls and warm-primary 20-run timing: OptDigits 0.848 vs 0.147; PenDigits 0.738 vs 0.125; MNIST and DBpedia favor pure EVōC
-• scale CUDA sweep: one timed fit over 30k synthetic controls, full MNIST/Fashion/CIFAR-10, full DBpedia, CoverType, Wiki-CS, and OGBN-Arxiv
-• opt-in guarded graph selector: separated spirals 1.000 ARI vs silhouette 0.151, with guards that fall back on MNIST/Fashion/CIFAR/OpenML rows
-• moons/circles are feasible ties when both methods use base_n_clusters=2: 1.000 vs 1.000
-• CIFAR-10 uses pooled 16x16 RGB features: 30k in the repeated default repro, 60k in the scale repro
-• intrinsic dimension, free from the kNN graph
-• out-of-sample predict()
+## Recommended standalone post
 
-Honest: not universal — tiny data/weak features are weak, fixed-k can beat auto selection,
-and DiRe layout cost dominates at these sizes. [link]
+> Introducing dire-evoc: an open-source package connecting GPU dimensionality reduction
+> with density clustering. It combines DiRe-RAPIDS + EVoC, estimates intrinsic dimension,
+> and predicts labels for new data. Tested with RAPIDS 26.06:
+> https://github.com/igorrivin/dire-evoc
+
+272 raw characters; 257 characters with X’s standard URL weighting.
+
+## Optional four-post thread
+
+### Post 1
+
+> 1/4 I’m releasing dire-evoc, an open-source Python package connecting DiRe-RAPIDS and EVoC.
+> It builds a GPU layout, finds density-based clusters, estimates intrinsic dimension, and
+> predicts labels for new data—all in one workflow.
+
+230 characters.
+
+### Post 2
+
+> 2/4 Why combine them? DiRe can expose structure hidden in high-dimensional data; EVoC finds
+> clusters in the resulting layout. dire-evoc supplies the bridge. Its intrinsic-dimension
+> estimate reuses DiRe’s neighbor graph, avoiding a second search.
+
+245 characters.
+
+### Post 3
+
+> 3/4 In one NVIDIA A10 sweep using matched data and base controls, dire-evoc improved
+> clustering scores on OptDigits, PenDigits, SatImage, and Image Segmentation. It tied on
+> several synthetic datasets; pure EVoC was slightly better on MNIST. Results vary by
+> dataset.
+
+265 characters.
+
+### Post 4
+
+> 4/4 The trade-off: dire-evoc is heavier because it creates a layout before clustering. It
+> pays off when that layout exposes structure raw-space clustering misses. Now tested with
+> RAPIDS 26.06. Code, examples, and benchmark details:
+> https://github.com/igorrivin/dire-evoc
+
+270 raw characters; 255 characters with X’s standard URL weighting.

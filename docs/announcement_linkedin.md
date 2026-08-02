@@ -1,42 +1,43 @@
-**Introducing `dire-evoc` — density clustering on GPU layouts, with honest benchmarks.**
+# LinkedIn announcement
 
-I've been building a small bridge between two tools I admire: Leland McInnes's **EVōC**
-(density-based clustering) and **DiRe-RAPIDS** (GPU dimensionality reduction, with Sasha
-Kolpakov). The idea is simple — use a DiRe layout as the *substrate* that EVōC clusters,
-and add the pieces that only make sense at the intersection.
+Clustering high-dimensional data is rarely a single problem.
 
-**What you get:**
-🔹 *A broader CUDA repro, not just a cherry-picked table.* The default run now covers 18
-datasets, writes per-dataset SVG/JSON/CSV artifacts, uses matched EVoC base controls for
-DiRe→EVōC and pure EVōC, and records 20-run warm-primary timings plus first-run and
-first-included fields.
-The scale run switches to one timed fit per dataset and covers 30k synthetic controls,
-full MNIST/Fashion-MNIST/CIFAR-10, full DBpedia-14 embeddings, Forest CoverType, Wiki-CS,
-and OGBN-Arxiv.
-The selector branch also adds an opt-in guarded graph-component selector: it recovers the
-separated-spirals control at **1.000 ARI** where coverage-weighted silhouette gets
-**0.151**, while falling back to silhouette on MNIST/Fashion/CIFAR/OpenML rows unless the
-graph candidate passes explicit guards.
-DiRe→EVōC wins Fashion-MNIST (**0.440 vs 0.390**), breast cancer (**0.404 vs 0.116**),
-iris (**0.562 vs 0.236**), wine (**0.465 vs 0.121**), and pooled CIFAR-10
-(**0.029 vs 0.012**). The newly added OpenML rows include strong DiRe→EVōC auto wins on
-OptDigits (**0.848 vs 0.147**) and PenDigits (**0.738 vs 0.125**); moons/circles are
-feasible ties when both methods use
-`base_n_clusters=2` (**1.000 vs 1.000**); pure EVōC wins MNIST (**0.720 vs 0.813**) and
-slightly wins DBpedia-14 (**0.607 vs 0.623**).
-🔹 *Intrinsic dimension, essentially free* — read straight off the k-NN graph DiRe already
-builds (TwoNN / Levina–Bickel), no second pass.
-🔹 *Out-of-sample `predict()`* — assign new points to existing clusters (EVōC itself has none).
+First, you need a representation that makes the structure visible. Then you need to find
+meaningful groups. And when new data arrives, you need a practical way to connect it to
+what you have already found.
 
-**And — because benchmarks should be honest — what you *don't* get:** it's not a universal
-win. Tiny data and weak feature representations are weak regimes, fixed-k can still be
-much better than auto selection on some datasets, and the DiRe layout cost dominates
-end-to-end time on most recorded rows. The CIFAR benchmark uses average-pooled 16x16 RGB
-features: 30k images in the repeated default repro and 60k in the scale repro.
+I’ve released dire-evoc, an open-source Python package that connects DiRe-RAPIDS and EVoC
+in one GPU-oriented workflow.
 
-So: better clustering where clustering is meaningful, free intrinsic dimension, and
-prediction — with benchmark artifacts that say where it loses. Full code + the
-reproducible metrics: [link]
+It provides:
 
-Built on the shoulders of @Leland McInnes (EVōC/UMAP/HDBSCAN) and @Alexander Kolpakov
-(DiRe-RAPIDS).
+• a one-call DiRe → EVoC clustering pipeline
+• intrinsic-dimension estimation that reuses DiRe’s existing nearest-neighbor graph
+• a GPU handoff for the expensive single-linkage-tree stage
+• out-of-sample prediction for assigning new observations
+• a reusable layout for visualization and further analysis
+
+The package is deliberately thin. It does not reimplement DiRe or EVoC; it makes their
+shared boundary explicit and adds the integration pieces that are useful when the two are
+used together.
+
+Just as importantly, the benchmark story is not “it wins everywhere.” It doesn’t.
+
+dire-evoc does more work than clustering raw vectors directly, so it is slower and earns
+that cost only when the DiRe layout exposes structure that the original feature space
+does not. Pure EVoC can still be the better choice when raw-space geometry already works
+well, and tiny datasets or weak feature representations remain difficult regimes.
+
+The repository includes reproducible benchmarks, including the cases where the approach
+ties or loses—not only its strongest results.
+
+The GPU path has now been tested with RAPIDS 26.06, and the CPU-facing CI matrix covers
+Python 3.10–3.14.
+
+Code, examples, and benchmark details:
+https://github.com/igorrivin/dire-evoc
+
+Built on the excellent work behind DiRe-RAPIDS and EVoC, with thanks to Sasha Kolpakov
+and Leland McInnes.
+
+#OpenSource #GPUComputing #MachineLearning #Clustering #RAPIDS

@@ -10,3 +10,5 @@ dist/
 .venv/
 artifacts/
 docs/_build/
+experiments/bistability_anchors/
+*.pyc
